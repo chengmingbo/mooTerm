@@ -156,23 +156,51 @@ struct PaneView: View {
     }
 
     private func executeOnPane(_ pane: Pane, line: String) {
+        // Default: hand the line to /bin/sh -c so we get real ls -l, pwd, cat,
+        // echo, head, etc. without having to teach the parser every command.
+        // Built-in shortcuts still run locally so `clear` and `cwd` work even
+        // if PATH lookup fails.
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         switch parts[0] {
-        case "echo":
-            pane.content.append((parts.count > 1 ? parts[1] : "") + "\n")
         case "clear":
             pane.content = "$ "
+            return
         case "cwd":
-            pane.content.append((pane.cwd ?? "?") + "\n")
-        case "ls":
-            let path = parts.count > 1 ? parts[1] : (pane.cwd ?? "/")
-            if let names = try? FileManager.default.contentsOfDirectory(atPath: path) {
-                pane.content.append(names.joined(separator: "  ") + "\n")
-            } else {
-                pane.content.append("ls: \(path): No such file or directory\n")
-            }
+            pane.content.append((pane.cwd ?? NSHomeDirectory()) + "\n")
+            return
         default:
-            pane.content.append("mterm MVP — unknown command '\(parts[0])'. try: echo, clear, cwd, ls\n")
+            break
+        }
+        runShell(line, pane: pane)
+    }
+
+    /// Runs `line` via `/bin/sh -c`, captures stdout+stderr, appends to the pane.
+    /// Runs synchronously on a background queue and hops back to main for the
+    /// UI mutation, so input stays responsive.
+    private func runShell(_ line: String, pane: Pane) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.launchPath = "/bin/sh"
+            task.arguments = ["-c", line]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+            do {
+                try task.run()
+            } catch {
+                DispatchQueue.main.async {
+                    pane.content.append("mterm: failed to run: \(error.localizedDescription)\n")
+                }
+                return
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            let out = String(data: data, encoding: .utf8) ?? ""
+            DispatchQueue.main.async {
+                if !out.isEmpty {
+                    pane.content.append(out.hasSuffix("\n") ? out : out + "\n")
+                }
+            }
         }
     }
 
