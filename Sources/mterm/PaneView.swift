@@ -1,6 +1,13 @@
 import SwiftUI
 import AppKit
 
+/// Notifications for menu items that originate inside SwiftUI views and need
+/// to mutate global state owned by AppDelegate (tabs, session).
+extension Notification.Name {
+    static let mtermNewTab = Notification.Name("mterm.newTab")
+    static let mtermCloseTab = Notification.Name("mterm.closeTab")
+}
+
 /// Focus state — which pane currently owns keyboard input. Lives on the
 /// store so cross-pane navigation works.
 final class FocusStore: ObservableObject {
@@ -92,6 +99,7 @@ struct PaneView: View {
             Rectangle()
                 .stroke(Color.accentColor.opacity(0.7), lineWidth: tab.activePaneID == pane.id ? 2 : 0)
         )
+        .contextMenu { paneContextMenu }
         .onTapGesture {
             tab.setActive(paneID: pane.id)
             focus.focusedPaneID = pane.id
@@ -115,9 +123,49 @@ struct PaneView: View {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .foregroundStyle(.cyan).font(.system(size: 10))
             }
+            // Inline header buttons — quick split/close without right-click.
+            Button {
+                tab.split(.horizontal)
+            } label: {
+                Image(systemName: "rectangle.split.2x1").font(.system(size: 10))
+            }
+            .buttonStyle(.plain).help("Split horizontally")
+            Button {
+                tab.split(.vertical)
+            } label: {
+                Image(systemName: "rectangle.split.1x2").font(.system(size: 10))
+            }
+            .buttonStyle(.plain).help("Split vertically")
+            Button {
+                tab.closeActivePane()
+            } label: {
+                Image(systemName: "xmark.circle").font(.system(size: 10))
+            }
+            .buttonStyle(.plain).help("Close pane")
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.gray.opacity(0.15))
+        .contextMenu { paneContextMenu }
+    }
+
+    /// Right-click / control-click menu on the pane.
+    @ViewBuilder
+    private var paneContextMenu: some View {
+        Button("Split Horizontally") { tab.split(.horizontal) }
+        Button("Split Vertically") { tab.split(.vertical) }
+        Divider()
+        Button("Close Pane") { tab.closeActivePane() }
+        Divider()
+        Button(tab.broadcast ? "Disable Broadcast Group" : "Enable Broadcast Group") {
+            tab.toggleBroadcast()
+        }
+        Button("New Tab") {
+            // Hand-off via NotificationCenter — SessionStore lives in the AppDelegate.
+            NotificationCenter.default.post(name: .mtermNewTab, object: nil)
+        }
+        Button("Close Tab") {
+            NotificationCenter.default.post(name: .mtermCloseTab, object: nil)
+        }
     }
 
     private var inputRow: some View {

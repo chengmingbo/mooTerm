@@ -55,11 +55,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         installMenu()
 
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(handleNewTab),
+            name: .mtermNewTab, object: nil)
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(handleCloseTab),
+            name: .mtermCloseTab, object: nil)
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.focus.focusedPaneID = self.sessionStore.activeTab?.activePaneID ?? self.sessionStore.activeTab?.root.pane?.id
         }
     }
+
+    @objc func handleNewTab() { sessionStore.newTab() }
+    @objc func handleCloseTab() { sessionStore.closeActiveTab() }
 
     private func installMenu() {
         let mainMenu = NSMenu()
