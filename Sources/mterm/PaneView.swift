@@ -14,99 +14,178 @@ final class FocusStore: ObservableObject {
     @Published var focusedPaneID: UUID?
 }
 
-/// Embeds an NSTextField that owns keyboard focus. The field is the actual
-/// receiver of mouse clicks + keystrokes; everything else is a styled display.
-struct TerminalInput: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
+/// The scrollback + cursor + input line, all in one piece. Renders scrollback
+/// as plain green text, then the current prompt + cursor + active input as a
+/// single NSTextField pinned to the bottom of the area. macOS Terminal and
+/// iTerm2 use this layout.
+struct TerminalSurface: NSViewRepresentable {
+    @Binding var scrollback: String       // pane.content (read-only text)
+    @Binding var input: String            // current line being typed
+    var isFocused: Bool                   // this pane owns keyboard
     var onSubmit: (String) -> Void
-    var onAnyKey: (String) -> Void
-    var focusRequest: Int       // bump to force-focus
-    var broadcasts: [Pane]      // when broadcast is on, echo keystrokes here too
+    var onFocusRequest: () -> Void
 
-    func makeNSView(context: Context) -> NSTextField {
-        let tf = NSTextField()
-        tf.isBezeled = false
-        tf.isBordered = false
-        tf.drawsBackground = false
-        tf.backgroundColor = .clear
-        tf.textColor = .green
-        tf.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        tf.placeholderString = placeholder
-        tf.delegate = context.coordinator
-        tf.cell?.usesSingleLineMode = true
-        tf.cell?.wraps = false
-        tf.cell?.isScrollable = true
-        tf.target = context.coordinator
-        tf.action = #selector(Coordinator.commit(_:))
-        DispatchQueue.main.async { tf.window?.makeFirstResponder(tf) }
-        return tf
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.backgroundColor = .black
+
+        // Scrollback text view — non-editable, just shows history.
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.textColor = NSColor(calibratedRed: 0.12, green: 0.78, blue: 0.75, alpha: 1)
+        textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.autoresizingMask = [.width]
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.textContainer?.widthTracksTextView = true
+
+        scroll.documentView = textView
+        context.coordinator.scrollbackView = textView
+
+        // Input row — pinned to the bottom of the scrollable area as a custom
+        // subview so it stays in view while scrollback scrolls.
+        let input = CursorInputField()
+        input.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        input.textColor = NSColor(calibratedRed: 0.12, green: 0.78, blue: 0.75, alpha: 1)
+        input.backgroundColor = .clear
+        input.drawsBackground = false
+        input.isBezeled = false
+        input.isBordered = false
+        input.placeholderString = ""
+        input.target = context.coordinator
+        input.action = #selector(Coordinator.commit(_:))
+        input.delegate = context.coordinator
+        input.cell?.usesSingleLineMode = true
+        input.cell?.wraps = false
+        input.cell?.isScrollable = true
+        input.translatesAutoresizingMaskIntoConstraints = false
+        context.coordinator.inputField = input
+
+        scroll.addSubview(input)
+        NSLayoutConstraint.activate([
+            input.leadingAnchor.constraint(equalTo: scroll.leadingAnchor, constant: 12),
+            input.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: -12),
+            input.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -6),
+            input.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        return scroll
     }
 
-    func updateNSView(_ tf: NSTextField, context: Context) {
-        if tf.stringValue != text { tf.stringValue = text }
-        context.coordinator.parent = self
-        if let win = tf.window, context.coordinator.lastFocusRequest != focusRequest {
-            context.coordinator.lastFocusRequest = focusRequest
-            DispatchQueue.main.async { win.makeFirstResponder(tf) }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let coord = context.coordinator
+        // Update scrollback text.
+        if let tv = coord.scrollbackView, tv.string != scrollback {
+            tv.string = scrollback
+            // Auto-scroll to bottom.
+            if let docView = scroll.documentView {
+                let bottom = NSPoint(x: 0, y: max(0, docView.frame.height - scroll.contentSize.height))
+                scroll.contentView.scroll(to: bottom)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
+        // Update input field.
+        if let f = coord.inputField, f.stringValue != input {
+            f.stringValue = input
+        }
+        // Focus management: focus the input field when this pane becomes active.
+        if isFocused, let win = scroll.window {
+            if coord.lastFocused != scroll.window?.windowNumber {
+                coord.lastFocused = win.windowNumber
+                DispatchQueue.main.async { [weak scroll] in
+                    guard let scroll = scroll,
+                          let field = coord.inputField,
+                          let editor = field.currentEditor() ?? field.window?.fieldEditor(true, for: field)
+                    else { return }
+                    _ = editor
+                    scroll.window?.makeFirstResponder(field)
+                }
+            }
+        } else {
+            coord.lastFocused = nil
         }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: TerminalInput
-        var lastFocusRequest: Int = 0
-        init(_ parent: TerminalInput) { self.parent = parent }
+        var parent: TerminalSurface
+        weak var scrollbackView: NSTextView?
+        weak var inputField: CursorInputField?
+        var lastFocused: Int?
+
+        init(_ parent: TerminalSurface) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
             guard let tf = obj.object as? NSTextField else { return }
-            parent.text = tf.stringValue
-            parent.onAnyKey(tf.stringValue)
+            parent.input = tf.stringValue
         }
 
         @objc func commit(_ sender: NSTextField) {
             parent.onSubmit(sender.stringValue)
             sender.stringValue = ""
-            parent.text = ""
+            parent.input = ""
         }
     }
 }
 
+/// NSTextField with a block cursor (▌) appended to the visible text — mimics
+/// macOS Terminal's caret when the field is empty or the user is typing.
+final class CursorInputField: NSTextField {
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if let editor = self.currentEditor() {
+            editor.selectedRange = NSRange(location: editor.string.count, length: 0)
+        }
+        return ok
+    }
+
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+    }
+}
+
+/// PaneView: renders a single terminal pane — header on top, terminal
+/// surface filling the rest, with split/close context menu.
 struct PaneView: View {
     @ObservedObject var pane: Pane
     @ObservedObject var tab: TabSession
     @EnvironmentObject var focus: FocusStore
     @State private var input: String = ""
-    @State private var focusRequest: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            ScrollView {
-                Text(pane.content)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.green)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .textSelection(.enabled)
-            }
+            TerminalSurface(
+                scrollback: Binding(
+                    get: { pane.content },
+                    set: { pane.content = $0 }),
+                input: $input,
+                isFocused: focus.focusedPaneID == pane.id,
+                onSubmit: { cmd in runCommand(cmd) },
+                onFocusRequest: { focus.focusedPaneID = pane.id }
+            )
             .background(Color.black)
-            inputRow
         }
         .background(Color.black)
         .overlay(
             Rectangle()
-                .stroke(Color.accentColor.opacity(0.7), lineWidth: tab.activePaneID == pane.id ? 2 : 0)
+                .stroke(Color.accentColor.opacity(0.7),
+                    lineWidth: tab.activePaneID == pane.id ? 2 : 0)
         )
         .contextMenu { paneContextMenu }
         .onTapGesture {
             tab.setActive(paneID: pane.id)
             focus.focusedPaneID = pane.id
-            focusRequest &+= 1
         }
         .onChange(of: focus.focusedPaneID) { newValue in
-            if newValue == pane.id { focusRequest &+= 1 }
+            if newValue == pane.id { /* focus handled in updateNSView */ }
         }
     }
 
@@ -123,32 +202,23 @@ struct PaneView: View {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .foregroundStyle(.cyan).font(.system(size: 10))
             }
-            // Inline header buttons — quick split/close without right-click.
-            Button {
-                tab.split(.horizontal)
-            } label: {
+            Button { tab.split(.horizontal) } label: {
                 Image(systemName: "rectangle.split.2x1").font(.system(size: 10))
             }
             .buttonStyle(.plain).help("Split horizontally")
-            Button {
-                tab.split(.vertical)
-            } label: {
+            Button { tab.split(.vertical) } label: {
                 Image(systemName: "rectangle.split.1x2").font(.system(size: 10))
             }
             .buttonStyle(.plain).help("Split vertically")
-            Button {
-                tab.closeActivePane()
-            } label: {
+            Button { tab.closeActivePane() } label: {
                 Image(systemName: "xmark.circle").font(.system(size: 10))
             }
             .buttonStyle(.plain).help("Close pane")
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.gray.opacity(0.15))
-        .contextMenu { paneContextMenu }
     }
 
-    /// Right-click / control-click menu on the pane.
     @ViewBuilder
     private var paneContextMenu: some View {
         Button("Split Horizontally") { tab.split(.horizontal) }
@@ -160,7 +230,6 @@ struct PaneView: View {
             tab.toggleBroadcast()
         }
         Button("New Tab") {
-            // Hand-off via NotificationCenter — SessionStore lives in the AppDelegate.
             NotificationCenter.default.post(name: .mtermNewTab, object: nil)
         }
         Button("Close Tab") {
@@ -168,63 +237,36 @@ struct PaneView: View {
         }
     }
 
-    private var inputRow: some View {
-        let broadcasts: [Pane] = tab.broadcast
-            ? tab.broadcastTargets(for: pane).filter { $0.id != pane.id }
-            : []
-        return HStack(spacing: 4) {
-            Text("$")
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.green)
-            TerminalInput(
-                text: $input,
-                placeholder: "type a command and press Return…",
-                onSubmit: { cmd in runCommand(cmd) },
-                onAnyKey: { _ in fanOutKey(broadcasts: broadcasts) },
-                focusRequest: focusRequest,
-                broadcasts: broadcasts
-            )
-        }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(Color(white: 0.08))
-    }
-
     private func runCommand(_ cmd: String) {
         let line = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return }
-        pane.content.append("$ \(line)\n")
+        pane.content.append("\(pane.prompt) \(line)\n")
         executeOnPane(pane, line: line)
-        // Broadcast: same command on every group member except self.
         if tab.broadcast {
             for other in tab.broadcastTargets(for: pane) where other.id != pane.id {
-                other.content.append("$ \(line)\n")
+                other.content.append("\(other.prompt) \(line)\n")
                 executeOnPane(other, line: line)
             }
         }
     }
 
     private func executeOnPane(_ pane: Pane, line: String) {
-        // Default: hand the line to /bin/sh -c so we get real ls -l, pwd, cat,
-        // echo, head, etc. without having to teach the parser every command.
-        // Built-in shortcuts still run locally so `clear` and `cwd` work even
-        // if PATH lookup fails.
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
         switch parts[0] {
         case "clear":
-            pane.content = "$ "
+            pane.content = ""
             return
-        case "cwd":
+        case "pwd":
             pane.content.append((pane.cwd ?? NSHomeDirectory()) + "\n")
             return
+        case "exit":
+            pane.content.append("(mterm MVP: shells persist; ignore exit)\n")
+            return
         default:
-            break
+            runShell(line, pane: pane)
         }
-        runShell(line, pane: pane)
     }
 
-    /// Runs `line` via `/bin/sh -c`, captures stdout+stderr, appends to the pane.
-    /// Runs synchronously on a background queue and hops back to main for the
-    /// UI mutation, so input stays responsive.
     private func runShell(_ line: String, pane: Pane) {
         DispatchQueue.global(qos: .userInitiated).async {
             let task = Process()
@@ -233,9 +275,8 @@ struct PaneView: View {
             let pipe = Pipe()
             task.standardOutput = pipe
             task.standardError = pipe
-            do {
-                try task.run()
-            } catch {
+            do { try task.run() }
+            catch {
                 DispatchQueue.main.async {
                     pane.content.append("mterm: failed to run: \(error.localizedDescription)\n")
                 }
@@ -251,13 +292,14 @@ struct PaneView: View {
             }
         }
     }
+}
 
-    /// When the user types into this pane while broadcast is on, mirror the
-    /// same string into every other pane in the group so they all run the
-    /// command simultaneously. MVP fan-out: at Submit time we run the command
-    /// in each pane.
-    private func fanOutKey(broadcasts: [Pane]) {
-        // per-keystroke echo is left as a TODO; submit-time fan-out is below.
-        _ = broadcasts
+extension Pane {
+    /// Lightweight prompt — when real SwiftTerm arrives, replace with the
+    /// OSC 7-derived cwd + a machine user@host.
+    var prompt: String {
+        let dir = cwd ?? NSHomeDirectory()
+        let short = (dir as NSString).lastPathComponent
+        return "\(NSUserName())@mterm:\(short)$"
     }
 }
