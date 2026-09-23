@@ -4,12 +4,17 @@ import SwiftUI
 struct mtermApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var sessionStore = SessionStore()
+    @StateObject private var focus = FocusStore()
 
     var body: some Scene {
         WindowGroup("mterm") {
             ContentView()
                 .environmentObject(sessionStore)
+                .environmentObject(focus)
                 .frame(minWidth: 720, minHeight: 360)
+                .onAppear {
+                    focus.focusedPaneID = sessionStore.activeTab?.activePaneID ?? sessionStore.activeTab?.root.pane?.id
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {

@@ -6,3 +6,5 @@ Package.resolved
 *.xcodeproj
 xcuserdata/
 DerivedData/
+# packaging — only the source bits are tracked
+Packaging/mterm.app/Contents/MacOS/mterm
