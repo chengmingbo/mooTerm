@@ -373,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func selectTabAction(_ sender: NSMenuItem) { sessionStore.selectTab(number: sender.tag) }
 
     static var dimInactivePanes: Bool {
-        UserDefaults.standard.object(forKey: UserDefaults.dimInactivePanesKey) as? Bool ?? true
+        UserDefaults.standard.object(forKey: UserDefaults.dimInactivePanesKey) as? Bool ?? false
     }
     @objc func toggleDimAction(_ sender: NSMenuItem) {
         let newValue = !Self.dimInactivePanes

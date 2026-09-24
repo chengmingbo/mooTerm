@@ -61,8 +61,8 @@ Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 Control keys such as ⌃A, ⌃E, ⌃L, ⌃R, ⌃U go to the shell unchanged.
 
 Drag a divider to resize panes; double-click it to split evenly. Clicking
-into a pane makes it active, and inactive panes are dimmed (View → Dim
-Inactive Panes). Tabs show a dot for new output and a bell when the shell
+into a pane makes it active (its border is highlighted; View → Dim Inactive Panes
+also dims the others, off by default). Tabs show a dot for new output and a bell when the shell
 rings. Closing a pane, tab, or the app asks first if a program is still
 running.
 

@@ -11,7 +11,7 @@ struct SettingsView: View {
     @EnvironmentObject var preferences: TerminalPreferences
     @EnvironmentObject var fontSizeStore: FontSizeStore
     @EnvironmentObject var schemeStore: ColorSchemeStore
-    @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = true
+    @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = false
 
     private var proxyDescription: String {
         let using = preferences.effectiveProxy()?.summary

@@ -19,7 +19,7 @@ struct PaneView: View {
     @EnvironmentObject var schemeStore: ColorSchemeStore
     @EnvironmentObject var fontSizeStore: FontSizeStore
     @EnvironmentObject var preferences: TerminalPreferences
-    @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = true
+    @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = false
 
     private var isActive: Bool { tab.activePaneID == pane.id }
     private var isOnlyVisiblePane: Bool { tab.zoomedPaneID != nil || tab.root.pane != nil }
