@@ -65,8 +65,10 @@ restart them. When a shell exits, its pane closes.
 
 ## Claude panel
 
-A narrow panel on the left (⇧⌘A, or the ✦ button in the tab bar) turns plain
-language into shell commands for the active pane:
+The thin activity bar on the far left holds tool buttons (Claude first, and
+Settings at the bottom). Click a button to open its panel; click it again to
+close it. The Claude panel (⇧⌘A) turns plain language into shell commands for
+the active pane:
 
 1. Type what you want — "10 largest files under here", "which process is on
    port 3000", "why did the last command fail?" — and press Return.
@@ -118,6 +120,7 @@ Sources/mterm/
 ├── PaneView.swift           Pane header, terminal, context menu, dimming
 ├── TerminalHost.swift       NSViewRepresentable that re-parents the pane's terminal
 ├── TerminalHostView.swift   ONLY file that imports SwiftTerm
+├── ActivityBar.swift        Thin left tool column; SidebarItem list
 ├── AssistantPanelView.swift Claude panel UI (left sidebar)
 ├── CommandAssistant.swift   Request → command proposals, risk checks, running
 ├── ProxySettings.swift      System/env/custom proxy → http_proxy variables

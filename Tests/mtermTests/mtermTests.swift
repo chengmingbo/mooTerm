@@ -560,3 +560,12 @@ func liveClaudeTranslatesARequest() throws {
                                environment: ["https_proxy": "http://127.0.0.1:7890"])
     #expect(seen["https_proxy"] == "http://127.0.0.1:7890")
 }
+
+// MARK: - Activity bar
+
+@Test func activityBarStartsWithClaude() {
+    #expect(SidebarItem.allCases.first == .claude)
+    let ids = SidebarItem.allCases.map(\.id)
+    #expect(Set(ids).count == ids.count)
+    #expect(SidebarItem(rawValue: "") == nil, "empty selection means the sidebar is closed")
+}

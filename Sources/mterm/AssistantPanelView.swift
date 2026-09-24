@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 extension UserDefaults {
-    static let assistantVisibleKey = "mTerm.assistant.visible"
     static let assistantWidthKey = "mTerm.assistant.width"
 }
 
@@ -14,7 +13,7 @@ struct AssistantPanelView: View {
     @EnvironmentObject var assistant: CommandAssistant
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var preferences: TerminalPreferences
-    @AppStorage(UserDefaults.assistantVisibleKey) private var isVisible = false
+    @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
     @State private var input = ""
     @State private var focusComposer = 0
 
@@ -59,7 +58,7 @@ struct AssistantPanelView: View {
                 .buttonStyle(.borderless)
                 .disabled(assistant.isThinking || assistant.entries.isEmpty)
                 .help("Clear conversation")
-            Button { isVisible = false } label: { Image(systemName: "xmark") }
+            Button { sidebarSelection = "" } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless)
                 .help("Close panel (⇧⌘A)")
         }

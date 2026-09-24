@@ -37,6 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.applyAppIcon()
+        // 0.2: the Claude panel's own visibility flag became the sidebar
+        // selection when the activity bar arrived.
+        if UserDefaults.standard.object(forKey: "mTerm.assistant.visible") != nil {
+            if UserDefaults.standard.bool(forKey: "mTerm.assistant.visible") {
+                UserDefaults.selectedSidebarItem = .claude
+            }
+            UserDefaults.standard.removeObject(forKey: "mTerm.assistant.visible")
+        }
         sessionStore = SessionStore()
         schemeStore = ColorSchemeStore()
         fontSizeStore = FontSizeStore()
@@ -366,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(selectScheme(_:)):
             item.state = (item.representedObject as? String) == schemeStore.current.id ? .on : .off
         case #selector(toggleAssistantAction):
-            item.state = UserDefaults.standard.bool(forKey: UserDefaults.assistantVisibleKey) ? .on : .off
+            item.state = UserDefaults.selectedSidebarItem == .claude ? .on : .off
         case #selector(toggleDimAction(_:)):
             item.state = Self.dimInactivePanes ? .on : .off
         default:
@@ -378,13 +386,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// ⇧⌘A: open the Claude panel and focus it; if it's open and focused,
     /// close it and return to the terminal.
     @objc func toggleAssistantAction() {
-        let defaults = UserDefaults.standard
-        let visible = defaults.bool(forKey: UserDefaults.assistantVisibleKey)
+        let visible = UserDefaults.selectedSidebarItem == .claude
         let terminalFocused = window?.firstResponder is MTermTerminalView
         if visible && terminalFocused {
             NotificationCenter.default.post(name: .mtermFocusAssistant, object: nil)
         } else {
-            defaults.set(!visible, forKey: UserDefaults.assistantVisibleKey)
+            UserDefaults.selectedSidebarItem = visible ? nil : .claude
             if visible, let view = sessionStore.activeTab?.activePane?.host?.view {
                 window?.makeFirstResponder(view)
             }

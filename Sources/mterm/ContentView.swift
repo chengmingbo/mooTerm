@@ -2,14 +2,16 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var store: SessionStore
-    @AppStorage(UserDefaults.assistantVisibleKey) private var showAssistant = false
+    @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
     @AppStorage(UserDefaults.assistantWidthKey) private var assistantWidth: Double = 300
     @State private var dragStartWidth: Double?
 
     var body: some View {
         HStack(spacing: 0) {
-            if showAssistant {
-                AssistantPanelView()
+            ActivityBar()
+            Divider()
+            if let item = SidebarItem(rawValue: sidebarSelection) {
+                SidebarPanel(item: item)
                     .frame(width: assistantWidth)
                 panelDivider
             }
@@ -51,12 +53,6 @@ struct ContentView: View {
                 tabButton(tab)
             }
             Spacer(minLength: 4)
-            Button { showAssistant.toggle() } label: {
-                Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(showAssistant ? Color.purple : Color.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Claude panel (⇧⌘A)")
             Button { store.newTab() } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold))
             }
