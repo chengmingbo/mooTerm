@@ -38,6 +38,74 @@ final class MooTermTerminalView: LocalProcessTerminalView {
         onOutput?()
     }
 
+    // MARK: Scrollbar
+
+    /// SwiftTerm's default "overlay" scroller never shows its knob outside
+    /// an NSScrollView, so mooTerm uses the classic scroller and controls
+    /// its visibility itself.
+    enum ScrollbarMode: String, CaseIterable, Sendable {
+        case always, whileScrolling, never
+
+        var title: String {
+            switch self {
+            case .always: return "Always"
+            case .whileScrolling: return "While scrolling"
+            case .never: return "Never"
+            }
+        }
+    }
+
+    nonisolated static let scrollbarModeKey = "mooTerm.scrollbar"
+
+    private(set) var scrollbarMode: ScrollbarMode?
+    private var fadeWorkItem: DispatchWorkItem?
+
+    var scrollerView: NSScroller? { subviews.lazy.compactMap { $0 as? NSScroller }.first }
+
+    func setScrollbarMode(_ mode: ScrollbarMode) {
+        guard mode != scrollbarMode else { return }
+        let wasHidden = scrollerView?.isHidden ?? false
+        scrollbarMode = mode
+        scrollerStyle = .legacy
+        guard let scroller = scrollerView else { return }
+        fadeWorkItem?.cancel()
+        switch mode {
+        case .always:
+            scroller.isHidden = false
+            scroller.alphaValue = 1
+        case .whileScrolling:
+            // Keeps its width (no reflow when it appears), just invisible.
+            scroller.isHidden = false
+            scroller.alphaValue = 0
+        case .never:
+            scroller.isHidden = true
+        }
+        // Hiding frees (or showing reserves) the scroller's width: re-fit columns.
+        if wasHidden != scroller.isHidden { setFrameSize(frame.size) }
+    }
+
+    /// Show the scroller briefly, then fade it out ("While scrolling").
+    func flashScroller() {
+        guard scrollbarMode == .whileScrolling, let scroller = scrollerView else { return }
+        fadeWorkItem?.cancel()
+        scroller.alphaValue = 1
+        let fade = DispatchWorkItem { [weak scroller] in
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.4
+                scroller?.animator().alphaValue = 0
+            }
+        }
+        fadeWorkItem = fade
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: fade)
+    }
+
+    /// Wheel, trackpad, and scroller scrolling report here; flash only when
+    /// the view is back in history (following new output stays at 1.0).
+    override func scrolled(source: TerminalView, position: Double) {
+        super.scrolled(source: source, position: position)
+        if position < 0.999 { flashScroller() }
+    }
+
     /// iTerm2's "Copy to pasteboard on selection": finishing a mouse
     /// selection (drag, double-click word, triple-click line) copies it.
     override func mouseUp(with event: NSEvent) {
@@ -129,6 +197,9 @@ final class TerminalHostView: NSObject {
         view.nativeBackgroundColor = scheme.nsBackground()
         view.nativeForegroundColor = scheme.nsForeground()
         view.caretColor = scheme.nsCaret()
+        // Dark track on dark themes, light on light ones.
+        let background = scheme.nsBackground().usingColorSpace(.sRGB) ?? .black
+        view.scrollerView?.appearance = NSAppearance(named: background.brightnessComponent < 0.5 ? .darkAqua : .aqua)
         view.needsDisplay = true
     }
 

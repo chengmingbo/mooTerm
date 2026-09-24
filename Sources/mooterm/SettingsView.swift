@@ -115,6 +115,9 @@ struct SettingsView: View {
                     })) {
                     ForEach(ColorScheme.all, id: \.id) { Text($0.displayName).tag($0.id) }
                 }
+                Picker("Scrollbar", selection: $preferences.scrollbarMode) {
+                    ForEach(MooTermTerminalView.ScrollbarMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
                 Toggle("Dim inactive panes", isOn: $dimInactivePanes)
                 Toggle("Copy text when selected", isOn: $copyOnSelect)
                     .help("Like iTerm2: selecting text with the mouse copies it, no ⌘C needed")

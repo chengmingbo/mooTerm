@@ -110,6 +110,11 @@ final class TerminalPreferences: ObservableObject {
         proxyInPanes ? (effectiveProxy()?.environment ?? [:]) : [:]
     }
 
+    /// Terminal scrollbar visibility (Settings → Appearance).
+    @Published var scrollbarMode: MooTermTerminalView.ScrollbarMode {
+        didSet { defaults.set(scrollbarMode.rawValue, forKey: MooTermTerminalView.scrollbarModeKey) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -126,6 +131,8 @@ final class TerminalPreferences: ObservableObject {
         self.proxyMode = defaults.string(forKey: Self.proxyModeKey).flatMap(ProxyMode.init(rawValue:)) ?? .automatic
         self.customProxy = defaults.string(forKey: Self.customProxyKey) ?? ""
         self.proxyInPanes = defaults.bool(forKey: Self.proxyInPanesKey)
+        self.scrollbarMode = defaults.string(forKey: MooTermTerminalView.scrollbarModeKey)
+            .flatMap(MooTermTerminalView.ScrollbarMode.init(rawValue:)) ?? .always
     }
 
     static func clampScrollback(_ lines: Int) -> Int {

@@ -14,6 +14,7 @@ struct TerminalHost: NSViewRepresentable {
     let scheme: ColorScheme
     let fontSize: CGFloat
     let scrollback: Int
+    var scrollbarMode: MooTermTerminalView.ScrollbarMode = .always
     /// Extra variables for the shell, used only when it first starts.
     let environment: [String: String]
 
@@ -36,6 +37,7 @@ struct TerminalHost: NSViewRepresentable {
         host.applyScheme(scheme)
         host.configureAppearance(fontSize: fontSize)
         host.applyScrollback(lines: scrollback)
+        host.view.setScrollbarMode(scrollbarMode)
         let coordinator = context.coordinator
         if isFocused && !coordinator.wasFocused {
             DispatchQueue.main.async { [weak view = host.view] in

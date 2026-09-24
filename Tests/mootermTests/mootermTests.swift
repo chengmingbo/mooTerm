@@ -1308,3 +1308,76 @@ private func openTestWindow(_ store: SessionStore, _ defaults: UserDefaults, sid
     }
     #expect(pane.copyToast == nil, "toast fades away")
 }
+
+// MARK: - Scrollbar
+
+@MainActor
+private func scrollbarWindow(_ mode: MooTermTerminalView.ScrollbarMode) -> (MooTermTerminalView, NSWindow) {
+    let view = MooTermTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 300),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    window.orderFront(nil)
+    view.setScrollbarMode(mode)
+    view.getTerminal().changeScrollback(1000)
+    view.feed(text: (1...300).map { "line \($0)" }.joined(separator: "\r\n"))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    return (view, window)
+}
+
+@MainActor
+@Test func scrollbarIsVisibleByDefault() throws {
+    try #require(NSScreen.main != nil)
+    #expect(TerminalPreferences(defaults: UserDefaults(suiteName: "mooterm-sb-\(UUID().uuidString)")!).scrollbarMode == .always)
+    let (view, window) = scrollbarWindow(.always)
+    defer { window.close() }
+    let scroller = try #require(view.scrollerView)
+    #expect(scroller.scrollerStyle == .legacy, "classic scroller: overlay never drew its knob")
+    #expect(!scroller.isHidden && scroller.alphaValue == 1)
+    #expect(scroller.isEnabled, "there is history to scroll")
+    view.scrollUp(lines: 50)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    if let dir = ProcessInfo.processInfo.environment["MOOTERM_PROBE_DIR"],
+       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("scrollbar-always.png"))
+    }
+}
+
+@MainActor
+@Test func neverModeGivesTheWidthBackToText() throws {
+    try #require(NSScreen.main != nil)
+    let (shown, w1) = scrollbarWindow(.always)
+    let (hidden, w2) = scrollbarWindow(.never)
+    defer { w1.close(); w2.close() }
+    #expect(hidden.scrollerView?.isHidden == true)
+    #expect(hidden.getTerminal().cols > shown.getTerminal().cols, "\(hidden.getTerminal().cols) vs \(shown.getTerminal().cols) columns")
+}
+
+@MainActor
+@Test func whileScrollingShowsThenFades() async throws {
+    try #require(NSScreen.main != nil)
+    let (view, window) = scrollbarWindow(.whileScrolling)
+    defer { window.close() }
+    let scroller = try #require(view.scrollerView)
+    #expect(scroller.alphaValue == 0, "hidden until you scroll")
+    view.feed(text: "\r\nmore output\r\n")   // following output isn't user scrolling
+    #expect(scroller.alphaValue == 0)
+    view.scrollUp(lines: 20)
+    #expect(scroller.alphaValue == 1, "appears when scrolled into history")
+    for _ in 0..<60 where scroller.alphaValue > 0.01 {
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    #expect(scroller.alphaValue < 0.01, "fades out after scrolling stops")
+}
+
+@MainActor
+@Test func scrollbarMatchesTheThemeBrightness() {
+    let host = TerminalHostView(startingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
+    host.view.setScrollbarMode(.always)
+    host.applyScheme(.solarizedLight)
+    #expect(host.view.scrollerView?.appearance?.name == .aqua)
+    host.applyScheme(.tomorrowNight)
+    #expect(host.view.scrollerView?.appearance?.name == .darkAqua)
+}

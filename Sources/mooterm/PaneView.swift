@@ -47,6 +47,7 @@ struct PaneView: View {
             scheme: schemeStore.current,
             fontSize: effectiveSize,
             scrollback: preferences.scrollbackLines,
+            scrollbarMode: preferences.scrollbarMode,
             environment: pane.host == nil ? preferences.paneEnvironment : [:]
         )
     }
