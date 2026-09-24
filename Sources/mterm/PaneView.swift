@@ -68,18 +68,23 @@ struct PaneView: View {
 
     private var header: some View {
         HStack(spacing: 4) {
-            Image(systemName: "terminal")
-            Text(pane.title).font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-            Spacer()
-            if let dir = pane.cwd {
-                Text(dir).font(.system(size: 10)).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
+            // Labels let clicks through to the header's click area below,
+            // so double-clicking the title works too.
+            Group {
+                Image(systemName: "terminal")
+                Text(pane.title).font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Spacer()
+                if let dir = pane.cwd {
+                    Text(dir).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                if tab.broadcast && pane.shellID != nil {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .foregroundStyle(.cyan).font(.system(size: 10))
+                }
             }
-            if tab.broadcast && pane.shellID != nil {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .foregroundStyle(.cyan).font(.system(size: 10))
-            }
+            .allowsHitTesting(false)
             Button { tab.split(.horizontal, pane: pane.id) } label: {
                 Image(systemName: "rectangle.split.1x2").font(.system(size: 10))
             }
@@ -94,15 +99,15 @@ struct PaneView: View {
             .buttonStyle(.plain).help("Close pane")
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Color.gray.opacity(0.15))
-        .contentShape(Rectangle())
-        .gesture(
-            TapGesture(count: 2)
-                .onEnded { tab.toggleMaximise(paneID: pane.id) }
-                .exclusively(before: TapGesture().onEnded { tab.setActive(paneID: pane.id) })
-        )
-        .help(tab.zoomedPaneID == pane.id
-              ? "Double-click to restore all panes"
+        // AppKit click handling (SwiftUI's double-tap didn't fire). With
+        // several panes, double-click fills the tab with this one; with a
+        // single pane there's nothing to maximise, so zoom the window.
+        .background(TitleBarArea(
+            onDoubleClick: tab.panes.count > 1 ? { tab.toggleMaximise(paneID: pane.id) } : nil,
+            onClick: { tab.setActive(paneID: pane.id) })
+            .background(Color.gray.opacity(0.15)))  // colour behind the click area
+        .help(tab.panes.count <= 1 ? "Double-click to zoom the window"
+              : tab.zoomedPaneID == pane.id ? "Double-click to restore all panes"
               : "Double-click to fill the tab with this pane")
     }
 

@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import SwiftUI
 @testable import mterm
 
 @MainActor
@@ -755,4 +756,88 @@ func liveDeepSeekTranslatesARequest() async {
     #expect(!tab.zoomBumpsFont, "maximise keeps the font size")
     tab.toggleMaximise(paneID: a.id)
     #expect(tab.zoomedPaneID == nil)
+}
+
+@MainActor
+@Test func zoomChangesAWindowBuiltLikeMTerms() throws {
+    try #require(NSScreen.main != nil, "needs a display")
+    let content = Color.clear.frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
+                                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
+    let hosting = NSHostingController(rootView: content)
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                          backing: .buffered, defer: false)
+    window.contentViewController = hosting
+    window.setContentSize(NSSize(width: 900, height: 600))
+    window.orderFront(nil)
+    window.isReleasedWhenClosed = false  // ARC owns it; close() must not free it too
+    defer { window.close() }
+    let before = window.frame
+    WindowDoubleClick.perform(on: window)
+    print("zoom:", before, "→", window.frame, "zoomed:", window.isZoomed)
+    #expect(window.frame != before)
+}
+
+@MainActor
+private func sendDoubleClick(to window: NSWindow, at point: NSPoint) {
+    for count in 1...2 {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                           clickCount: count, pressure: 1)!
+            window.sendEvent(event)
+        }
+    }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+}
+
+@MainActor
+@Test func titleBarAreaDoubleClickReachesAppKit() throws {
+    try #require(NSScreen.main != nil)
+    nonisolated(unsafe) var fired = 0
+    let view = HStack {
+        Text("tab")
+        TitleBarArea(onDoubleClick: { fired += 1 })
+            .frame(minWidth: 4, maxWidth: .infinity, minHeight: 22, maxHeight: 22)
+    }.frame(width: 400, height: 40)
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: 40),
+                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.contentViewController = NSHostingController(rootView: view)
+    window.makeKeyAndOrderFront(nil)
+    window.isReleasedWhenClosed = false  // ARC owns it; close() must not free it too
+    defer { window.close() }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    sendDoubleClick(to: window, at: NSPoint(x: 300, y: 20))
+    #expect(fired == 1, "double-click on empty tab-bar space reaches the handler")
+}
+
+@MainActor
+@Test func paneHeaderDoubleClickWorksOverItsLabels() throws {
+    try #require(NSScreen.main != nil)
+    nonisolated(unsafe) var doubles = 0
+    nonisolated(unsafe) var singles = 0
+    // Same shape as PaneView's header: labels and a button over the area.
+    let view = HStack {
+        Group {
+            Image(systemName: "terminal")
+            Text("chengmb@host")
+        }
+        .allowsHitTesting(false)  // as in PaneView: clicks fall through to the area
+        Spacer()
+        Button("x") {}
+    }
+    .frame(width: 400, height: 30)
+    .background(TitleBarArea(onDoubleClick: { doubles += 1 }, onClick: { singles += 1 })
+        .background(Color.gray.opacity(0.15)))
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: 30),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = NSHostingController(rootView: view)
+    window.makeKeyAndOrderFront(nil)
+    defer { window.close() }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    sendDoubleClick(to: window, at: NSPoint(x: 200, y: 15))   // empty middle
+    #expect(doubles == 1 && singles == 1)
+    sendDoubleClick(to: window, at: NSPoint(x: 60, y: 15))    // over the title text
+    #expect(doubles == 2, "labels don't swallow the double-click")
 }

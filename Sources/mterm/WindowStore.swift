@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 /// What double-clicking a title-bar-like area does, per System Settings →
 /// Desktop & Dock → "Double-click a window's title bar to".
@@ -84,5 +85,45 @@ final class WindowStore: ObservableObject {
             window.titleVisibility = .hidden
         }
         window.level = alwaysOnTop ? .floating : .normal
+    }
+}
+/// Empty space that behaves like a window title bar: double-click zooms
+/// the window (per System Settings) unless `onDoubleClick` overrides it. Uses AppKit's own
+/// click counting — SwiftUI's `onTapGesture(count: 2)` didn't fire here.
+struct TitleBarArea: NSViewRepresentable {
+    /// Runs instead of the window action when set (e.g. maximise a pane).
+    var onDoubleClick: (() -> Void)? = nil
+    var onClick: (() -> Void)? = nil
+
+    func makeNSView(context: Context) -> TitleBarAreaView {
+        let view = TitleBarAreaView()
+        updateNSView(view, context: context)
+        return view
+    }
+
+    func updateNSView(_ view: TitleBarAreaView, context: Context) {
+        view.onDoubleClick = onDoubleClick
+        view.onClick = onClick
+    }
+}
+
+final class TitleBarAreaView: NSView {
+    var onDoubleClick: (() -> Void)?
+    var onClick: (() -> Void)?
+
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            if let onDoubleClick {
+                onDoubleClick()
+            } else {
+                MainActor.assumeIsolated { WindowDoubleClick.perform(on: window) }
+            }
+        } else {
+            onClick?()
+            super.mouseDown(with: event)
+        }
     }
 }
