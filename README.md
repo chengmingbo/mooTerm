@@ -14,6 +14,20 @@ Arranges terminals in a grid of resizable panes with broadcast-group support, li
 > navigation, plus a Settings window. Profiles, drag-drop rearrange, and a
 > plugin host are not implemented yet — see `TODO.md`.
 
+## Install
+
+Download `mooTerm-<version>.dmg` (or `.zip`) from
+[Releases](https://github.com/chengmingbo/mooTerm/releases), open it, and drag
+**mooTerm** to Applications. It's a universal app: Apple silicon (arm64) and
+Intel (x86_64), macOS 13 or later.
+
+The app is ad-hoc signed, not notarized, so the first launch is blocked by
+Gatekeeper. Right-click mooTerm in Applications → **Open** → **Open**, or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/mooTerm.app
+```
+
 ## Build & run
 
 ```sh
@@ -140,6 +154,7 @@ Details:
 ```sh
 bash scripts/build.sh            # Packaging/mooTerm.app
 bash scripts/build.sh --install  # also replace /Applications/mooTerm.app
+bash scripts/release.sh 0.2.0    # universal app + zip + dmg in dist/
 bash Packaging/make-icns.sh      # regenerate the icon from Resources/mooterm_logo.png
 ```
 
