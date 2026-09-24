@@ -21,13 +21,15 @@ enum mTermMain {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var window: NSWindow?
     var sessionStore: SessionStore!
     var schemeStore: ColorSchemeStore!
     var fontSizeStore: FontSizeStore!
     var layoutStore: LayoutStore!
     var windowStore: WindowStore!
+    var preferences: TerminalPreferences!
+    private var settingsWindow: NSWindow?
     weak var themeMenu: NSMenu?
     weak var layoutsMenu: NSMenu?
     weak var windowMenu: NSMenu?
@@ -39,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fontSizeStore = FontSizeStore()
         layoutStore = LayoutStore()
         windowStore = WindowStore()
+        preferences = TerminalPreferences()
 
         let contentView = ContentView()
             .environmentObject(sessionStore)
@@ -46,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environmentObject(fontSizeStore)
             .environmentObject(layoutStore)
             .environmentObject(windowStore)
+            .environmentObject(preferences)
             .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
 
@@ -109,6 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let about = NSMenuItem(title: "About mTerm", action: #selector(aboutAction), keyEquivalent: "")
         about.target = self
         appMenu.addItem(about)
+        appMenu.addItem(NSMenuItem.separator())
+        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettingsAction), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(settings)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Quit mTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
@@ -342,6 +350,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newValue = !Self.dimInactivePanes
         UserDefaults.standard.set(newValue, forKey: UserDefaults.dimInactivePanesKey)
         sender.state = newValue ? .on : .off
+    }
+
+    /// Checkmarks are computed when a menu opens, so they stay right when
+    /// the same setting is changed from the Settings window.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(selectScheme(_:)):
+            item.state = (item.representedObject as? String) == schemeStore.current.id ? .on : .off
+        case #selector(toggleDimAction(_:)):
+            item.state = Self.dimInactivePanes ? .on : .off
+        default:
+            break
+        }
+        return true
+    }
+
+    @objc func showSettingsAction() {
+        if settingsWindow == nil {
+            let view = SettingsView()
+                .environmentObject(preferences)
+                .environmentObject(fontSizeStore)
+                .environmentObject(schemeStore)
+            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            window.title = "mTerm Settings"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc func aboutAction() {

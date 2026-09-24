@@ -13,6 +13,7 @@ struct TerminalHost: NSViewRepresentable {
     let isFocused: Bool
     let scheme: ColorScheme
     let fontSize: CGFloat
+    let scrollback: Int
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -22,10 +23,11 @@ struct TerminalHost: NSViewRepresentable {
 
     func updateNSView(_ container: NSView, context: Context) {
         let host = attachTerminal(to: container)
-        // Both setters no-op when the value is unchanged, so ordinary
+        // These setters no-op when the value is unchanged, so ordinary
         // SwiftUI updates stay cheap.
         host.applyScheme(scheme)
         host.configureAppearance(fontSize: fontSize)
+        host.applyScrollback(lines: scrollback)
         let coordinator = context.coordinator
         if isFocused && !coordinator.wasFocused {
             DispatchQueue.main.async { [weak view = host.view] in
@@ -46,7 +48,7 @@ struct TerminalHost: NSViewRepresentable {
 
     @discardableResult
     private func attachTerminal(to container: NSView) -> TerminalHostView {
-        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme)
+        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme, scrollback: scrollback)
         if host.view.superview !== container {
             host.view.removeFromSuperview()
             host.view.frame = container.bounds

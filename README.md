@@ -37,6 +37,7 @@ at build time.
 | Clear buffer (screen + scrollback) | ⌘K |
 | Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
 | Save layout | ⇧⌘S |
+| Settings (scrollback lines, font, theme, dimming) | ⌘, |
 
 Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 
@@ -54,6 +55,9 @@ into a pane makes it active, and inactive panes are dimmed (View → Dim
 Inactive Panes). Tabs show a dot for new output and a bell when the shell
 rings. Closing a pane, tab, or the app asks first if a program is still
 running.
+
+Scrollback defaults to 10,000 lines per pane. Change it in Settings (⌘,),
+from 0 (off) to 1,000,000; open panes resize their history immediately.
 
 Shells belong to their panes, so splitting, zooming, and switching tabs never
 restart them. When a shell exits, its pane closes.
@@ -80,6 +84,8 @@ Sources/mterm/
 ├── TerminalHostView.swift   ONLY file that imports SwiftTerm
 ├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
 ├── CloseConfirmation.swift  "program still running" prompts
+├── SettingsView.swift       Settings window (⌘,)
+├── TerminalPreferences.swift Scrollback size and other terminal prefs
 ├── SessionStore.swift       Window-wide state: tabs, active tab
 ├── LayoutStore.swift        Saved layouts (JSON in Application Support)
 └── ColorScheme / FontSizeStore / WindowStore / AccentColor

@@ -6,7 +6,7 @@
 - [x] Layout save/load (JSON on disk)
 - [ ] Profiles (font, colour, shell)
 - [ ] Drag-drop pane rearrange
-- [ ] Settings window (SwiftUI .settings scene)
+- [x] Settings window (scrollback, font, theme, dimming)
 - [ ] Drag-reorder tabs
 - [ ] Plugin host (Python? JS via bundled interpreter?)
 - [ ] CI: build on tag → universal .app + DMG
@@ -19,6 +19,6 @@
 - [ ] Jump between prompts (⇧⌘↑/↓) using SwiftTerm's OSC 133 marks
 - [ ] Notify when a long-running command finishes in a background tab
 - [ ] ⌘-click to open URLs and file paths
-- [ ] Copy on select, Option-as-Meta toggle, scrollback size (Settings window)
+- [ ] Copy on select, Option-as-Meta toggle (Settings window)
 - [ ] Profiles and per-pane badges
 - [ ] Session restore on relaunch (tabs, splits, directories)

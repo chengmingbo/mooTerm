@@ -173,8 +173,8 @@ import AppKit
     // Regression: SwiftUI owned the terminal, so splitting, zooming, or
     // switching tabs destroyed the shell and started a new one.
     let pane = Pane(cwd: NSTemporaryDirectory())
-    let first = pane.ensureHost(fontSize: 13, scheme: .terminator)
-    let second = pane.ensureHost(fontSize: 13, scheme: .terminator)
+    let first = pane.ensureHost(fontSize: 13, scheme: .terminator, scrollback: 1_000)
+    let second = pane.ensureHost(fontSize: 13, scheme: .terminator, scrollback: 1_000)
     #expect(first === second)
     pane.terminate()
     #expect(pane.host == nil)
@@ -287,4 +287,54 @@ private func keyEvent(_ chars: String, _ ignoring: String, _ mods: NSEvent.Modif
         view.keyDown(with: keyEvent(ctrl, letter, [.control]))
         #expect(sent == [byte], "⌃\(letter.uppercased())")
     }
+}
+
+// MARK: - Scrollback and ⌘K
+
+@MainActor
+private func bufferText(_ host: TerminalHostView) -> String {
+    String(decoding: host.view.getTerminal().getBufferAsData(), as: UTF8.self)
+}
+
+@MainActor
+private func feedLines(_ host: TerminalHostView, _ count: Int) {
+    host.view.feed(text: (1...count).map { "line \($0)" }.joined(separator: "\r\n") + "\r\n")
+}
+
+@MainActor
+@Test func clearBufferWipesScreenAndScrollback() {
+    let host = TerminalHostView(startingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
+    host.applyScrollback(lines: 1_000)
+    feedLines(host, 300)
+    #expect(bufferText(host).contains("line 1\n"), "early lines are in scrollback before ⌘K")
+    #expect(bufferText(host).contains("line 300"))
+    host.clearBuffer()
+    #expect(!bufferText(host).contains("line"), "⌘K leaves neither screen nor history")
+}
+
+@MainActor
+@Test func scrollbackLimitIsAppliedToTheTerminal() {
+    let host = TerminalHostView(startingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
+    host.applyScrollback(lines: 50)
+    feedLines(host, 500)
+    let text = bufferText(host)
+    #expect(!text.contains("line 100\n"), "lines beyond the 50-line history are dropped")
+    #expect(text.contains("line 500"))
+    host.applyScrollback(lines: 1_000)
+    feedLines(host, 900)
+    #expect(bufferText(host).contains("line 10\n"), "raising the limit keeps more history")
+}
+
+@MainActor
+@Test func terminalPreferencesClampAndPersistScrollback() {
+    let defaults = UserDefaults(suiteName: "mterm-prefs-test-\(UUID().uuidString)")!
+    let prefs = TerminalPreferences(defaults: defaults)
+    #expect(prefs.scrollbackLines == TerminalPreferences.defaultScrollback)
+    prefs.scrollbackLines = 25_000
+    #expect(TerminalPreferences(defaults: defaults).scrollbackLines == 25_000)
+    prefs.scrollbackLines = -5
+    #expect(prefs.scrollbackLines == 0)
+    prefs.scrollbackLines = 9_999_999
+    #expect(prefs.scrollbackLines == TerminalPreferences.scrollbackRange.upperBound)
+    #expect(TerminalPreferences(defaults: defaults).scrollbackLines == TerminalPreferences.scrollbackRange.upperBound)
 }

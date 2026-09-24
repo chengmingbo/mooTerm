@@ -18,6 +18,7 @@ struct PaneView: View {
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var schemeStore: ColorSchemeStore
     @EnvironmentObject var fontSizeStore: FontSizeStore
+    @EnvironmentObject var preferences: TerminalPreferences
     @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = true
 
     private var isActive: Bool { tab.activePaneID == pane.id }
@@ -41,7 +42,8 @@ struct PaneView: View {
             pane: pane,
             isFocused: isActive,
             scheme: schemeStore.current,
-            fontSize: effectiveSize
+            fontSize: effectiveSize,
+            scrollback: preferences.scrollbackLines
         )
     }
 

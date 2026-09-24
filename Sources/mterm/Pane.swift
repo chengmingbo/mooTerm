@@ -40,12 +40,13 @@ final class Pane: ObservableObject, Identifiable {
     }
 
     /// The pane's terminal, created and started on first use.
-    func ensureHost(fontSize: CGFloat, scheme: ColorScheme) -> TerminalHostView {
+    func ensureHost(fontSize: CGFloat, scheme: ColorScheme, scrollback: Int) -> TerminalHostView {
         if let host { return host }
         let dir = URL(fileURLWithPath: cwd ?? NSHomeDirectory())
         let host = TerminalHostView(startingDirectory: dir)
         host.configureAppearance(fontSize: fontSize)
         host.applyScheme(scheme)
+        host.applyScrollback(lines: scrollback)
         host.currentDirectoryDidChange = { [weak self] url in self?.cwd = url.path }
         host.titleChanged = { [weak self] title in
             self?.title = title.isEmpty ? "shell" : title

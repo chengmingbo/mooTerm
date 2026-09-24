@@ -67,6 +67,15 @@ final class TerminalHostView: NSObject {
 
     private var appliedFontSize: CGFloat?
     private var appliedSchemeID: String?
+    private var appliedScrollback: Int?
+
+    /// Resize the history buffer. Shrinking drops the oldest lines;
+    /// 0 turns scrollback off.
+    func applyScrollback(lines: Int) {
+        guard lines != appliedScrollback else { return }
+        appliedScrollback = lines
+        view.getTerminal().changeScrollback(lines)
+    }
 
     /// Set the terminal font size. SwiftTerm's `font` setter recomputes the
     /// cell size, resizes the grid (sending SIGWINCH to the shell), and
