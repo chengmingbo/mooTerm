@@ -24,7 +24,6 @@ enum mTermMain {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
     var sessionStore: SessionStore!
-    var focus: FocusStore!
     var schemeStore: ColorSchemeStore!
     var fontSizeStore: FontSizeStore!
     var layoutStore: LayoutStore!
@@ -36,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.applyAppIcon()
         sessionStore = SessionStore()
-        focus = FocusStore()
         schemeStore = ColorSchemeStore()
         fontSizeStore = FontSizeStore()
         layoutStore = LayoutStore()
@@ -44,7 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let contentView = ContentView()
             .environmentObject(sessionStore)
-            .environmentObject(focus)
             .environmentObject(schemeStore)
             .environmentObject(fontSizeStore)
             .environmentObject(layoutStore)
@@ -74,30 +71,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         installMenu()
 
-        NotificationCenter.default.addObserver(self,
-            selector: #selector(handleNewTab),
-            name: .mtermNewTab, object: nil)
-        NotificationCenter.default.addObserver(self,
-            selector: #selector(handleCloseTab),
-            name: .mtermCloseTab, object: nil)
-        NotificationCenter.default.addObserver(self,
-            selector: #selector(handleFindInPane(_:)),
-            name: .mtermFindInPane, object: nil)
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.focus.focusedPaneID = self.sessionStore.activeTab?.activePaneID ?? self.sessionStore.activeTab?.root.pane?.id
+        // Clicking into a terminal makes its pane the active one, so menu
+        // commands (split, close, find) target what the user is looking at.
+        firstResponderObservation = win.observe(\.firstResponder, options: [.new]) { window, _ in
+            MainActor.assumeIsolated {
+                (window.firstResponder as? MTermTerminalView)?.onBecomeFirstResponder?()
+            }
+        }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Local monitors run on the main thread.
+            nonisolated(unsafe) let event = event
+            return MainActor.assumeIsolated { NaturalTextEditing.handle(event) } ? nil : event
         }
     }
 
-    @objc func handleNewTab() { sessionStore.newTab() }
-    @objc func handleCloseTab() { sessionStore.closeActiveTab() }
+    private var firstResponderObservation: NSKeyValueObservation?
+    private var keyMonitor: Any?
 
-    @objc func handleFindInPane(_ note: Notification) {
-        guard let info = note.userInfo,
-              let paneID = info["paneID"] as? UUID else { return }
-        let term = (info["term"] as? String) ?? ""
-        focus.findRequest = FindRequest(paneID: paneID, term: term)
+    /// Quitting kills every shell, so confirm when programs are running.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        CloseConfirmation.confirm(closing: "mTerm", running: sessionStore.runningProcessNames)
+            ? .terminateNow : .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        sessionStore.tabs.forEach { $0.terminate() }
     }
 
     private func installMenu() {
@@ -108,7 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
-        appMenu.addItem(NSMenuItem(title: "About mTerm", action: nil, keyEquivalent: ""))
+        let about = NSMenuItem(title: "About mTerm", action: #selector(aboutAction), keyEquivalent: "")
+        about.target = self
+        appMenu.addItem(about)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(NSMenuItem(title: "Quit mTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
@@ -123,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let closeTab = NSMenuItem(title: "Close Tab", action: #selector(closeTabAction), keyEquivalent: "w")
         closeTab.target = self
         fileMenu.addItem(closeTab)
+        fileMenu.addItem(NSMenuItem.separator())
+        let clear = NSMenuItem(title: "Clear Buffer", action: #selector(clearBufferAction), keyEquivalent: "k")
+        clear.target = self
+        fileMenu.addItem(clear)
         fileMenu.addItem(NSMenuItem.separator())
         let saveLayout = NSMenuItem(title: "Save Layout As…", action: #selector(saveLayoutAction), keyEquivalent: "s")
         saveLayout.keyEquivalentModifierMask = [.command, .shift]
@@ -139,10 +143,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenu.addItem(NSMenuItem.separator())
-        let findItem = NSMenuItem(title: "Find…", action: #selector(findAction), keyEquivalent: "f")
-        findItem.keyEquivalentModifierMask = [.command, .shift]
-        findItem.target = self
-        editMenu.addItem(findItem)
+        // Find uses SwiftTerm's built-in find bar via the standard text
+        // finder actions; nil target routes to the focused terminal.
+        let finderItems: [(String, String, NSEvent.ModifierFlags, NSTextFinder.Action)] = [
+            ("Find…", "f", [.command], .showFindInterface),
+            ("Find Next", "g", [.command], .nextMatch),
+            ("Find Previous", "g", [.command, .shift], .previousMatch),
+            ("Use Selection for Find", "e", [.command], .setSearchString),
+        ]
+        for (title, key, mods, action) in finderItems {
+            let item = NSMenuItem(title: title, action: #selector(NSResponder.performTextFinderAction(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = mods
+            item.tag = action.rawValue
+            editMenu.addItem(item)
+        }
 
         // View
         let viewItem = NSMenuItem()
@@ -157,6 +171,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitV.keyEquivalentModifierMask = [.command, .shift]
         splitV.target = self
         viewMenu.addItem(splitV)
+        // iTerm2 alias: ⌘D splits side by side.
+        let splitVAlias = NSMenuItem(title: "Split Vertically", action: #selector(splitVAction), keyEquivalent: "d")
+        splitVAlias.keyEquivalentModifierMask = [.command]
+        splitVAlias.target = self
+        splitVAlias.isHidden = true
+        splitVAlias.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(splitVAlias)
+        viewMenu.addItem(NSMenuItem.separator())
+
+        // Pane navigation (iTerm2): ⌘⌥ + arrows moves spatially, ⌘] / ⌘[ cycles.
+        let arrows: [(String, Int, PaneNavigation)] = [
+            ("Select Pane Left", NSLeftArrowFunctionKey, .left),
+            ("Select Pane Right", NSRightArrowFunctionKey, .right),
+            ("Select Pane Above", NSUpArrowFunctionKey, .up),
+            ("Select Pane Below", NSDownArrowFunctionKey, .down),
+        ]
+        for (title, key, direction) in arrows {
+            let item = NSMenuItem(title: title, action: #selector(selectPaneAction(_:)),
+                                  keyEquivalent: String(Character(UnicodeScalar(key)!)))
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.target = self
+            item.representedObject = direction
+            viewMenu.addItem(item)
+        }
+        let nextPane = NSMenuItem(title: "Next Pane", action: #selector(nextPaneAction), keyEquivalent: "]")
+        nextPane.target = self
+        viewMenu.addItem(nextPane)
+        let prevPane = NSMenuItem(title: "Previous Pane", action: #selector(previousPaneAction), keyEquivalent: "[")
+        prevPane.target = self
+        viewMenu.addItem(prevPane)
+        let dim = NSMenuItem(title: "Dim Inactive Panes", action: #selector(toggleDimAction(_:)), keyEquivalent: "")
+        dim.target = self
+        dim.state = Self.dimInactivePanes ? .on : .off
+        viewMenu.addItem(dim)
         viewMenu.addItem(NSMenuItem.separator())
         let closePane = NSMenuItem(title: "Close Pane", action: #selector(closePaneAction), keyEquivalent: "w")
         closePane.keyEquivalentModifierMask = [.command, .option]
@@ -248,6 +296,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aot.target = self
         aot.state = windowStore.alwaysOnTop ? .on : .off
         windowMenu.addItem(aot)
+        windowMenu.addItem(NSMenuItem.separator())
+        let nextTab = NSMenuItem(title: "Show Next Tab", action: #selector(nextTabAction), keyEquivalent: "]")
+        nextTab.keyEquivalentModifierMask = [.command, .shift]
+        nextTab.target = self
+        windowMenu.addItem(nextTab)
+        let prevTab = NSMenuItem(title: "Show Previous Tab", action: #selector(previousTabAction), keyEquivalent: "[")
+        prevTab.keyEquivalentModifierMask = [.command, .shift]
+        prevTab.target = self
+        windowMenu.addItem(prevTab)
+        for number in 1...9 {
+            let item = NSMenuItem(title: number == 9 ? "Select Last Tab" : "Select Tab \(number)",
+                                  action: #selector(selectTabAction(_:)), keyEquivalent: "\(number)")
+            item.target = self
+            item.tag = number
+            windowMenu.addItem(item)
+        }
         self.windowMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
@@ -256,10 +320,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu actions
 
     @objc func newTabAction() { sessionStore.newTab() }
-    @objc func closeTabAction() { sessionStore.closeActiveTab() }
+    @objc func closeTabAction() { sessionStore.requestCloseTab() }
     @objc func splitHAction() { sessionStore.activeTab?.split(.horizontal) }
     @objc func splitVAction() { sessionStore.activeTab?.split(.vertical) }
-    @objc func closePaneAction() { sessionStore.activeTab?.closeActivePane() }
+    @objc func closePaneAction() { sessionStore.requestClosePane() }
+    @objc func clearBufferAction() { sessionStore.activeTab?.activePane?.host?.clearBuffer() }
+    @objc func selectPaneAction(_ sender: NSMenuItem) {
+        guard let direction = sender.representedObject as? PaneNavigation else { return }
+        sessionStore.activeTab?.focusNeighbor(direction)
+    }
+    @objc func nextPaneAction() { sessionStore.activeTab?.cyclePane(by: 1) }
+    @objc func previousPaneAction() { sessionStore.activeTab?.cyclePane(by: -1) }
+    @objc func nextTabAction() { sessionStore.cycleTab(by: 1) }
+    @objc func previousTabAction() { sessionStore.cycleTab(by: -1) }
+    @objc func selectTabAction(_ sender: NSMenuItem) { sessionStore.selectTab(number: sender.tag) }
+
+    static var dimInactivePanes: Bool {
+        UserDefaults.standard.object(forKey: UserDefaults.dimInactivePanesKey) as? Bool ?? true
+    }
+    @objc func toggleDimAction(_ sender: NSMenuItem) {
+        let newValue = !Self.dimInactivePanes
+        UserDefaults.standard.set(newValue, forKey: UserDefaults.dimInactivePanesKey)
+        sender.state = newValue ? .on : .off
+    }
+
+    @objc func aboutAction() {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? Self.version
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: "mTerm",
+            .applicationVersion: version,
+            .version: info?["CFBundleVersion"] as? String ?? "dev",
+        ]
+        if let icon = NSApp.applicationIconImage { options[.applicationIcon] = icon }
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
+    /// Fallback shown by About when running outside the .app (`swift run`).
+    /// Keep in sync with Packaging/mterm.app/Contents/Info.plist.
+    static let version = "0.2.0"
     @objc func broadcastAction() { sessionStore.activeTab?.toggleBroadcast() }
 
     @objc func zoomAction() {
@@ -277,11 +377,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     @objc func unzoomAction() { sessionStore.activeTab?.unzoom() }
-
-    @objc func findAction() {
-        guard let paneID = sessionStore.activeTab?.activePaneID else { return }
-        focus.findRequest = FindRequest(paneID: paneID, term: "")
-    }
 
     @objc func selectScheme(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,

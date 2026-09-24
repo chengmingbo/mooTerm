@@ -2,6 +2,7 @@ import Testing
 import AppKit
 @testable import mterm
 
+@MainActor
 @Test func splitTreeGrowsOnSplit() {
     let tab = TabSession()
     #expect(tab.collectPanes(tab.root).count == 1)
@@ -11,6 +12,7 @@ import AppKit
     #expect(tab.collectPanes(tab.root).count == 3)
 }
 
+@MainActor
 @Test func closePaneReducesTree() {
     let tab = TabSession()
     tab.split(.horizontal)
@@ -20,6 +22,7 @@ import AppKit
     #expect(tab.collectPanes(tab.root).count == 2)
 }
 
+@MainActor
 @Test func broadcastTargetsIncludeSameGroup() {
     let tab = TabSession()
     let p1 = tab.collectPanes(tab.root)[0]
@@ -32,6 +35,7 @@ import AppKit
     #expect(targets.count == 2)
 }
 
+@MainActor
 @Test func sessionStoreClosesAndReopens() {
     let store = SessionStore()
     let first = store.activeTabID
@@ -94,11 +98,12 @@ import AppKit
     #expect(reloaded.size == FontSizeStore.maxSize)
 }
 
+@MainActor
 @Test func tabTitlePrefersCustomTitleOverCwd() {
     let tab = TabSession()
     tab.root.pane?.cwd = nil
     #expect(tab.title == "shell", "fresh tab with no cwd shows shell")
-    tab.root.pane?.cwd = "/Users/chengmb/projects/foo"
+    tab.root.pane?.cwd = "/tmp/projects/foo"
     #expect(tab.title == "foo")
     tab.customTitle = "Production"
     #expect(tab.title == "Production")
@@ -111,34 +116,6 @@ import AppKit
 @Test func accentColorAllCasesHaveUniqueIDs() {
     let ids = AccentColor.allCases.map(\.id)
     #expect(Set(ids).count == ids.count)
-}
-
-@Test func scrollbackBufferCountsAndFindsCaseInsensitive() {
-    let buf = ScrollbackBuffer()
-    // No trailing LF — the last line lives in `pending` and only reaches
-    // snapshot via the snapshot computed property.
-    let payload = Array("Hello world\nfoo bar\nhello again".utf8)
-    buf.append(bytes: payload[...])
-    #expect(buf.count(of: "hello") == 2)
-    #expect(buf.count(of: "HELLO") == 2)
-    #expect(buf.count(of: "missing") == 0)
-    let matches = buf.find("hello")
-    #expect(matches.count == 2)
-    #expect(matches[0].lineIndex == 1)
-    #expect(matches[1].lineIndex == 3)
-}
-
-@Test func scrollbackBufferStripsAnsiEscapes() {
-    let buf = ScrollbackBuffer()
-    // "\u{1B}[31mERROR\u{1B}[0m: not found\n" should leave only the printable chars.
-    let payload: [UInt8] = [0x1B, 0x5B, 0x33, 0x31, 0x6D,
-                            0x45, 0x52, 0x52, 0x4F, 0x52,
-                            0x1B, 0x5B, 0x30, 0x6D,
-                            0x3A, 0x20, 0x6E, 0x6F, 0x74, 0x20, 0x66, 0x6F, 0x75, 0x6E, 0x64,
-                            0x0A]
-    buf.append(bytes: payload[...])
-    #expect(buf.count(of: "ERROR") == 1)
-    #expect(buf.count(of: "not found") == 1)
 }
 
 @MainActor
@@ -178,14 +155,6 @@ import AppKit
     #expect(restored.customTitle == "production")
     #expect(restored.accent == .blue)
 }
-@MainActor
-@Test func terminalHostCoordinatorKeepsHostAlive() {
-    // Regression: a weak coordinator reference let the host deallocate right
-    // after makeNSView, so font/theme changes only applied after relaunch.
-    let coordinator = TerminalHost.Coordinator(paneID: UUID())
-    coordinator.host = TerminalHostView(startingDirectory: URL(fileURLWithPath: NSHomeDirectory()))
-    #expect(coordinator.host != nil)
-}
 
 @MainActor
 @Test func terminalHostViewAppliesFontSizeImmediately() {
@@ -195,4 +164,127 @@ import AppKit
     host.configureAppearance(fontSize: 20)
     #expect(host.view.font.pointSize == 20)
     #expect(host.view.font.isFixedPitch)
+}
+
+// MARK: - Pane lifecycle and navigation
+
+@MainActor
+@Test func paneKeepsItsTerminalAcrossRemounts() {
+    // Regression: SwiftUI owned the terminal, so splitting, zooming, or
+    // switching tabs destroyed the shell and started a new one.
+    let pane = Pane(cwd: NSTemporaryDirectory())
+    let first = pane.ensureHost(fontSize: 13, scheme: .terminator)
+    let second = pane.ensureHost(fontSize: 13, scheme: .terminator)
+    #expect(first === second)
+    pane.terminate()
+    #expect(pane.host == nil)
+}
+
+@MainActor
+@Test func splitTargetsGivenPaneAndInheritsCwd() {
+    let tab = TabSession(cwd: "/tmp")
+    let original = tab.panes[0]
+    tab.split(.vertical)                 // [original | b], b active
+    let b = tab.activePane!
+    #expect(b.cwd == "/tmp", "new split starts in the split pane's directory")
+    original.cwd = "/usr"
+    tab.split(.horizontal, pane: original.id)
+    #expect(tab.panes.count == 3)
+    #expect(tab.activePane?.cwd == "/usr", "split acted on the given pane, not the active one")
+}
+
+@MainActor
+@Test func closePaneClosesTheGivenPaneNotTheActiveOne() {
+    let tab = TabSession()
+    let a = tab.panes[0]
+    tab.split(.vertical)
+    let b = tab.activePane!
+    #expect(tab.closePane(a.id))
+    #expect(tab.panes.map(\.id) == [b.id])
+    #expect(!tab.closePane(b.id), "last pane can't be closed by the tab")
+}
+
+@MainActor
+@Test func spatialPaneNavigation() {
+    // Layout: [ a | (b over c) ]
+    let tab = TabSession()
+    let a = tab.panes[0]
+    tab.split(.vertical)
+    let b = tab.activePane!
+    tab.split(.horizontal)
+    let c = tab.activePane!
+    #expect(tab.neighbor(of: a.id, .right) != nil)
+    #expect(tab.neighbor(of: b.id, .left) == a.id)
+    #expect(tab.neighbor(of: c.id, .left) == a.id)
+    #expect(tab.neighbor(of: b.id, .down) == c.id)
+    #expect(tab.neighbor(of: c.id, .up) == b.id)
+    #expect(tab.neighbor(of: a.id, .left) == nil)
+    tab.setActive(paneID: c.id)
+    tab.cyclePane(by: 1)
+    #expect(tab.activePaneID == a.id, "cycling wraps around")
+}
+
+@MainActor
+@Test func tabNumberShortcutsAndCycling() {
+    let store = SessionStore()
+    store.newTab()
+    store.newTab()
+    let ids = store.tabs.map(\.id)
+    store.selectTab(number: 1)
+    #expect(store.activeTabID == ids[0])
+    store.selectTab(number: 9)
+    #expect(store.activeTabID == ids[2], "⌘9 selects the last tab")
+    store.cycleTab(by: 1)
+    #expect(store.activeTabID == ids[0])
+    store.cycleTab(by: -1)
+    #expect(store.activeTabID == ids[2])
+}
+
+@MainActor
+@Test func switchingTabsClearsActivityIndicators() {
+    let store = SessionStore()
+    let first = store.activeTab!
+    store.newTab()
+    first.panes[0].hasUnseenOutput = true
+    first.panes[0].bellRang = true
+    #expect(first.hasUnseenOutput && first.bellRang)
+    store.setActive(first.id)
+    #expect(!first.hasUnseenOutput && !first.bellRang)
+}
+
+// MARK: - Keyboard
+
+private func keyEvent(_ chars: String, _ ignoring: String, _ mods: NSEvent.ModifierFlags, keyCode: UInt16 = 0) -> NSEvent {
+    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: 0,
+                     windowNumber: 0, context: nil, characters: chars,
+                     charactersIgnoringModifiers: ignoring, isARepeat: false, keyCode: keyCode)!
+}
+
+@MainActor
+@Test func naturalTextEditingMapsMacShortcutsToReadline() {
+    let left = String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
+    let right = String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+    #expect(NaturalTextEditing.bytes(for: keyEvent(left, left, [.command, .function, .numericPad])) == [0x01])
+    #expect(NaturalTextEditing.bytes(for: keyEvent(right, right, [.command])) == [0x05])
+    #expect(NaturalTextEditing.bytes(for: keyEvent(left, left, [.option])) == [0x1B, 0x62])
+    #expect(NaturalTextEditing.bytes(for: keyEvent("\u{7F}", "\u{7F}", [.command])) == [0x15])
+    #expect(NaturalTextEditing.bytes(for: keyEvent("\u{7F}", "\u{7F}", [.option])) == [0x1B, 0x7F])
+    // ⌘⌥← is pane navigation, and plain control keys go to the shell as-is.
+    #expect(NaturalTextEditing.bytes(for: keyEvent(left, left, [.command, .option])) == nil)
+    #expect(NaturalTextEditing.bytes(for: keyEvent("\u{01}", "a", [.control])) == nil)
+}
+
+@MainActor
+@Test func controlKeysReachTheShell() {
+    // ⌃A / ⌃E / ⌃L / ⌃R / ⌃U are handled by the shell's line editor; the
+    // terminal just has to deliver the raw control byte.
+    let view = MTermTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+    var sent: [UInt8] = []
+    view.onInput = { sent += $0 }
+    for (letter, byte) in [("a", 0x01), ("e", 0x05), ("l", 0x0C), ("r", 0x12), ("u", 0x15)] as [(String, UInt8)] {
+        sent = []
+        let ctrl = String(Character(UnicodeScalar(byte)))
+        view.keyDown(with: keyEvent(ctrl, letter, [.control]))
+        #expect(sent == [byte], "⌃\(letter.uppercased())")
+    }
 }

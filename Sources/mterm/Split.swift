@@ -1,16 +1,25 @@
 import Foundation
+import Combine
 
 enum SplitDirection { case horizontal, vertical }
 
+/// Direction for keyboard pane navigation (⌘⌥ + arrow).
+enum PaneNavigation { case left, right, up, down }
+
 /// Class-based split node. (Indirect recursive enums with class payloads trigger
 /// a Swift 6.1 IRGen crash, so we use a flat class hierarchy instead.)
-class SplitNode: Identifiable {
+/// Observable so dragging a divider re-lays out just this split.
+@MainActor
+final class SplitNode: ObservableObject, Identifiable {
     let id = UUID()
-    var ratio: CGFloat
+    /// Fraction of the split given to `first`.
+    @Published var ratio: CGFloat
     var direction: SplitDirection
     var first: SplitNode?
     var second: SplitNode?
     var pane: Pane?
+
+    static let ratioRange: ClosedRange<CGFloat> = 0.1...0.9
 
     init(pane: Pane) {
         self.pane = pane
@@ -24,7 +33,7 @@ class SplitNode: Identifiable {
         self.direction = direction
         self.first = first
         self.second = second
-        self.ratio = ratio
+        self.ratio = min(max(ratio, Self.ratioRange.lowerBound), Self.ratioRange.upperBound)
         self.pane = nil
     }
 

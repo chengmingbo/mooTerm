@@ -2,8 +2,11 @@ import Foundation
 import Combine
 
 /// Top-level session store: one window, many tabs. Tabs own a split tree of panes.
+@MainActor
 final class SessionStore: ObservableObject {
-    @Published var tabs: [TabSession] = [TabSession()]
+    @Published var tabs: [TabSession] = [] {
+        didSet { tabs.forEach(wire) }
+    }
     @Published var activeTabID: UUID
 
     var activeTab: TabSession? {
@@ -12,14 +15,17 @@ final class SessionStore: ObservableObject {
 
     init() {
         let first = TabSession()
-        self.tabs = [first]
         self.activeTabID = first.id
+        self.tabs = [first]
+        wire(first)
     }
 
+    /// Open a tab in the active pane's directory (iTerm2's "reuse previous
+    /// session's directory").
     func newTab() {
-        let t = TabSession()
+        let t = TabSession(cwd: activeTab?.activePane?.currentDirectory)
         tabs.append(t)
-        activeTabID = t.id
+        setActive(t.id)
     }
 
     func closeTab(_ id: UUID) {
@@ -30,8 +36,8 @@ final class SessionStore: ObservableObject {
             let t = TabSession()
             tabs.append(t)
             activeTabID = t.id
-        } else {
-            activeTabID = tabs[min(idx, tabs.count - 1)].id
+        } else if activeTabID == id {
+            setActive(tabs[min(idx, tabs.count - 1)].id)
         }
     }
 
@@ -39,5 +45,35 @@ final class SessionStore: ObservableObject {
         closeTab(activeTabID)
     }
 
-    func setActive(_ id: UUID) { activeTabID = id }
+    /// Switch tabs, clearing activity/bell indicators on both the tab being
+    /// left (so it only lights up for output that arrives afterwards) and
+    /// the one being shown.
+    func setActive(_ id: UUID) {
+        activeTab?.clearIndicators()
+        activeTabID = id
+        activeTab?.clearIndicators()
+    }
+
+    /// ⌘1…⌘9: select tab by position; ⌘9 always selects the last tab.
+    func selectTab(number: Int) {
+        guard !tabs.isEmpty, number >= 1 else { return }
+        let index = number == 9 ? tabs.count - 1 : number - 1
+        guard tabs.indices.contains(index) else { return }
+        setActive(tabs[index].id)
+    }
+
+    func cycleTab(by offset: Int) {
+        guard tabs.count > 1, let current = tabs.firstIndex(where: { $0.id == activeTabID }) else { return }
+        setActive(tabs[(current + offset % tabs.count + tabs.count) % tabs.count].id)
+    }
+
+    /// Foreground programs that quitting would kill, across every tab.
+    var runningProcessNames: [String] { tabs.flatMap(\.runningProcessNames) }
+
+    private func wire(_ tab: TabSession) {
+        tab.onLastPaneExited = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.closeTab(tab.id)
+        }
+    }
 }

@@ -1,79 +1,63 @@
 import AppKit
 import SwiftUI
-import Combine
 
-/// SwiftUI wrapper around DropTerm's `TerminalHostView`. One shell per pane,
-/// started the moment the SwiftUI view is mounted. The host auto-respawns the
-/// shell if the user types `exit`.
+/// SwiftUI wrapper that shows a pane's terminal.
 ///
-/// This is the only file that bridges SwiftUI and SwiftTerm. `PaneView`
-/// instantiates one `TerminalHost` per pane and forgets about it.
+/// The terminal itself belongs to the `Pane`, not to this view. SwiftUI
+/// rebuilds pane views whenever the split tree changes shape, a pane is
+/// zoomed, or the user switches tabs; each rebuild only re-parents the
+/// existing terminal view into a fresh container, so the shell and its
+/// scrollback are untouched.
 struct TerminalHost: NSViewRepresentable {
-    let paneID: UUID
-    let startingDirectory: URL
+    let pane: Pane
     let isFocused: Bool
     let scheme: ColorScheme
     let fontSize: CGFloat
-    let onCwdChange: (URL) -> Void
 
     func makeNSView(context: Context) -> NSView {
-        let host = TerminalHostView(startingDirectory: startingDirectory)
-        host.configureAppearance(fontSize: fontSize)
-        host.applyScheme(scheme)
-        host.currentDirectoryDidChange = { [weak coordinator = context.coordinator] url in
-            coordinator?.handleCwdChange(url)
-        }
-        context.coordinator.host = host
-        context.coordinator.onCwdChange = onCwdChange
-        ScrollbackRegistry.shared.register(paneID: paneID, buffer: host.scrollback)
-        host.startShell(in: startingDirectory)
-        return host.view
+        let container = NSView()
+        attachTerminal(to: container)
+        return container
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ container: NSView, context: Context) {
+        let host = attachTerminal(to: container)
+        // Both setters no-op when the value is unchanged, so ordinary
+        // SwiftUI updates stay cheap.
+        host.applyScheme(scheme)
+        host.configureAppearance(fontSize: fontSize)
         let coordinator = context.coordinator
-        coordinator.onCwdChange = onCwdChange
         if isFocused && !coordinator.wasFocused {
-            DispatchQueue.main.async { [weak nsView] in
-                guard let nsView else { return }
-                nsView.window?.makeFirstResponder(nsView)
+            DispatchQueue.main.async { [weak view = host.view] in
+                guard let view, let window = view.window,
+                      window.firstResponder !== view else { return }
+                window.makeFirstResponder(view)
             }
         }
         coordinator.wasFocused = isFocused
-        // Re-apply scheme + font size so menu-driven changes recolour and
-        // resize every open pane immediately. Both setters no-op when the
-        // value is unchanged, so ordinary SwiftUI updates stay cheap.
-        coordinator.host?.applyScheme(scheme)
-        coordinator.host?.configureAppearance(fontSize: fontSize)
     }
 
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.host?.view.removeFromSuperview()
-        coordinator.host = nil
-        ScrollbackRegistry.shared.unregister(paneID: coordinator.paneID)
+    /// Only detach: the pane keeps the terminal alive for the next mount.
+    static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
+        container.subviews.forEach { $0.removeFromSuperview() }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(paneID: paneID)
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @discardableResult
+    private func attachTerminal(to container: NSView) -> TerminalHostView {
+        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme)
+        if host.view.superview !== container {
+            host.view.removeFromSuperview()
+            host.view.frame = container.bounds
+            host.view.autoresizingMask = [.width, .height]
+            container.addSubview(host.view)
+        }
+        return host
     }
 
     @MainActor
     final class Coordinator {
-        let paneID: UUID
-        /// Strong: nothing else retains the host (the NSView only references
-        /// it through a weak delegate back-pointer). A weak reference here
-        /// let it deallocate right after `makeNSView`, silently dropping
-        /// every later font, scheme, and cwd update.
-        var host: TerminalHostView?
         var wasFocused = false
-        var onCwdChange: ((URL) -> Void)?
-
-        init(paneID: UUID) {
-            self.paneID = paneID
-        }
-
-        func handleCwdChange(_ url: URL) {
-            onCwdChange?(url)
-        }
     }
 }

@@ -169,8 +169,7 @@ final class LayoutStore: ObservableObject {
     func restore(_ layout: SavedLayout, into store: SessionStore) {
         store.tabs.forEach { $0.terminate() }
         let rebuiltTabs: [TabSession] = layout.tabs.map { tab in
-            let t = TabSession()
-            t.id = tab.id
+            let t = TabSession(id: tab.id)
             t.customTitle = tab.customTitle
             t.accent = AccentColor(rawValue: tab.accent ?? "") ?? .none
             t.broadcast = tab.broadcast

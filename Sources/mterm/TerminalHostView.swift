@@ -1,32 +1,36 @@
 import AppKit
+import Darwin
 import SwiftTerm
 import Foundation
 
-/// Subclass of `LocalProcessTerminalView` that captures every byte that
-/// arrives from the child process into a `ScrollbackBuffer`. Required
-/// because `LocalProcessTerminalView.feed(byteArray:)` is `public` rather
-/// than `open` and `dataReceived(slice:)` is the only `open` hook we can
-/// safely intercept on the macOS build.
+/// `LocalProcessTerminalView` with the hooks mTerm needs: output activity
+/// and bell notifications for tab indicators.
 @MainActor
-final class CapturingLocalProcessTerminalView: LocalProcessTerminalView {
-    let scrollback = ScrollbackBuffer()
+final class MTermTerminalView: LocalProcessTerminalView {
+    var onOutput: (() -> Void)?
+    var onBell: (() -> Void)?
+    var onBecomeFirstResponder: (() -> Void)?
+    /// Bytes the user typed/pasted into this terminal (for broadcast).
+    var onInput: ((ArraySlice<UInt8>) -> Void)?
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        super.send(source: source, data: data)
+        onInput?(data)
     }
 
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-    }
-
-    convenience init(font: NSFont? = nil) {
-        self.init(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
-        if let font { self.font = font }
+    /// Write straight to the PTY without re-broadcasting.
+    func sendToProcess(_ data: ArraySlice<UInt8>) {
+        process.send(data: data)
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
-        scrollback.append(bytes: slice)
         super.dataReceived(slice: slice)
+        onOutput?()
+    }
+
+    override func bell(source: Terminal) {
+        super.bell(source: source)
+        onBell?()
     }
 }
 
@@ -38,13 +42,9 @@ final class CapturingLocalProcessTerminalView: LocalProcessTerminalView {
 /// settings, or session bookkeeping.
 @MainActor
 final class TerminalHostView: NSObject {
-    let view: CapturingLocalProcessTerminalView
+    let view: MTermTerminalView
     private(set) var currentDirectory: URL
     private var processDelegate: ProcessDelegate
-
-    /// Read-only access to the scrollback buffer; ⌘F in the pane queries
-    /// this for matches.
-    var scrollback: ScrollbackBuffer { view.scrollback }
 
     var title: String = "" {
         didSet { titleChanged?(title) }
@@ -58,7 +58,7 @@ final class TerminalHostView: NSObject {
 
     init(startingDirectory: URL) {
         self.currentDirectory = startingDirectory.standardizedFileURL
-        self.view = CapturingLocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
+        self.view = MTermTerminalView(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
         self.processDelegate = ProcessDelegate()
         super.init()
         self.processDelegate.owner = self
@@ -88,28 +88,61 @@ final class TerminalHostView: NSObject {
         view.needsDisplay = true
     }
 
-    func startShell(shell: String? = nil) {
-        let resolvedShell = shell ?? Self.resolveLoginShell()
+    /// Start the login shell in the given directory — or, when `command` is
+    /// set, run it through the shell. Passing the directory explicitly
+    /// matters: `.app` bundles launched via `open` have `/` as their cwd.
+    func startShell(in directory: URL, command: String? = nil) {
+        let resolvedShell = Self.resolveLoginShell()
+        var args = ["-l"]
+        if let command, !command.isEmpty { args += ["-c", command] }
         view.startProcess(
             executable: resolvedShell,
-            args: ["-l"],
+            args: args,
             environment: Self.shellEnvironment(shellPath: resolvedShell),
-            execName: URL(fileURLWithPath: resolvedShell).lastPathComponent
+            execName: "-" + URL(fileURLWithPath: resolvedShell).lastPathComponent,
+            currentDirectory: directory.path
         )
     }
 
-    /// Start the shell in the given directory. Use this instead of
-    /// `startShell()` so the child zsh does not inherit the host process's
-    /// cwd, which on macOS `.app` bundles launched via `open` is `/`.
-    func startShell(in directory: URL) {
-        let resolvedShell = Self.resolveLoginShell()
-        view.startProcess(
-            executable: resolvedShell,
-            args: ["-l"],
-            environment: Self.shellEnvironment(shellPath: resolvedShell),
-            execName: URL(fileURLWithPath: resolvedShell).lastPathComponent,
-            currentDirectory: directory.path
-        )
+    /// Hang up the shell (SIGHUP to its process group, like closing a
+    /// terminal window) so child jobs exit too.
+    func terminate() {
+        processDelegate.owner = nil
+        guard view.process.running else { return }
+        let pid = view.process.shellPid
+        if pid > 0 { kill(-pid, SIGHUP) }
+        view.terminate()
+    }
+
+    /// Clear the screen and scrollback (iTerm2's ⌘K), then ask an idle shell
+    /// to redraw its prompt.
+    func clearBuffer() {
+        view.feed(text: "\u{1b}[H\u{1b}[2J")
+        view.clearScrollback()
+        if shellIsIdle { view.send([0x0C]) }
+    }
+
+    /// Name of the foreground job when it is not the shell itself.
+    var foregroundProcessName: String? {
+        guard view.process.running else { return nil }
+        let pgrp = tcgetpgrp(view.process.childfd)
+        guard pgrp > 0, pgrp != view.process.shellPid else { return nil }
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard proc_name(pgrp, &buffer, UInt32(buffer.count)) > 0 else { return "a process" }
+        return String(cString: buffer)
+    }
+
+    /// The shell's actual cwd, read from the kernel. Works even when the
+    /// shell doesn't emit OSC 7 (bash, fish, custom prompts).
+    var liveWorkingDirectory: String? {
+        guard view.process.running else { return nil }
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(view.process.shellPid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        return path.isEmpty ? nil : path
     }
 
     /// True when the shell owns the PTY foreground process group and is safe to
