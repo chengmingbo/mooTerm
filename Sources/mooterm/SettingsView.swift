@@ -12,7 +12,7 @@ struct SettingsView: View {
         let using = preferences.effectiveProxy()?.summary
         switch preferences.proxyMode {
         case .automatic:
-            return "Uses the macOS system proxy (System Settings → Network → Proxies, e.g. from Clash), or proxy variables mTerm was launched with. Currently: \(using ?? "no proxy found")."
+            return "Uses the macOS system proxy (System Settings → Network → Proxies, e.g. from Clash), or proxy variables mooTerm was launched with. Currently: \(using ?? "no proxy found")."
         case .custom:
             return "Sets http_proxy, https_proxy, and all_proxy to this URL. Currently: \(using ?? "not set")."
         case .off:
@@ -161,7 +161,7 @@ private struct AssistantSettingsSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .help("Without a saved key, mTerm uses $\(variable) from your shell profile.")
+                    .help("Without a saved key, mooTerm uses $\(variable) from your shell profile.")
             }
         } header: {
             Text("Assistants")

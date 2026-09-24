@@ -110,12 +110,12 @@ final class LoginShellProcess: @unchecked Sendable {
     private var didTimeOut = false
 
     static func launchScript(for tool: String) -> String {
-        #"if type \#(tool) >/dev/null 2>&1; then \#(tool) "$@"; elif [ -n "$MTERM_TOOL_BIN" ]; then "$MTERM_TOOL_BIN" "$@"; else exit 127; fi"#
+        #"if type \#(tool) >/dev/null 2>&1; then \#(tool) "$@"; elif [ -n "$MOOTERM_TOOL_BIN" ]; then "$MOOTERM_TOOL_BIN" "$@"; else exit 127; fi"#
     }
 
     static func launch(tool: String, arguments: [String]) -> (executable: String, arguments: [String]) {
         let shell = TerminalHostView.resolveLoginShell()
-        return (shell, ["-l", "-i", "-c", launchScript(for: tool), "mterm-\(tool)"] + arguments)
+        return (shell, ["-l", "-i", "-c", launchScript(for: tool), "mooterm-\(tool)"] + arguments)
     }
 
     func run(tool: String, fallbackPaths: [String], arguments: [String], stdin: String,
@@ -130,7 +130,7 @@ final class LoginShellProcess: @unchecked Sendable {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         environment["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
         if let fallback = fallbackPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            environment["MTERM_TOOL_BIN"] = fallback
+            environment["MOOTERM_TOOL_BIN"] = fallback
         }
         for (key, value) in extra { environment[key] = value.isEmpty ? nil : value }
         process.environment = environment
@@ -215,7 +215,7 @@ final class ClaudeCLI: CommandTranslator, @unchecked Sendable {
         var arguments = [
             "--print",
             "--output-format", "json",
-            "--tools", "",                   // translate only; mTerm runs the command
+            "--tools", "",                   // translate only; mooTerm runs the command
             "--no-session-persistence",
             "--setting-sources", "project",  // skip user hooks/plugins: ~10x cheaper
             "--strict-mcp-config",
@@ -292,7 +292,7 @@ final class CodexCLI: CommandTranslator, @unchecked Sendable {
         let runner = self.runner
         return await Task.detached(priority: .userInitiated) {
             let dir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("mterm-codex-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("mooterm-codex-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: dir) }
             let schemaFile = dir.appendingPathComponent("schema.json")
             let outputFile = dir.appendingPathComponent("last.txt")
@@ -354,7 +354,7 @@ final class ChatCompletionsClient: CommandTranslator, @unchecked Sendable {
         return body
     }
 
-    /// Session honouring mTerm's proxy setting. Automatic uses URLSession's
+    /// Session honouring mooTerm's proxy setting. Automatic uses URLSession's
     /// own default, which already follows the macOS system proxy.
     static func session(proxy: APIProxy) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral

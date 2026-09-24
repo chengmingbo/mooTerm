@@ -2,13 +2,13 @@ import AppKit
 import SwiftUI
 
 extension UserDefaults {
-    static let assistantWidthKey = "mTerm.assistant.width"
+    static let assistantWidthKey = "mooTerm.assistant.width"
 }
 
 /// Narrow left-hand assistant panel (Claude, Codex, DeepSeek, MiniMax):
 /// describe what you want in plain language, get a shell command (usually a
 /// pipeline), review it, and run it in the active pane. Modelled on
-/// NemoMac's Claude sidebar, but the model only *proposes* commands — mTerm
+/// NemoMac's Claude sidebar, but the model only *proposes* commands — mooTerm
 /// types them into your shell when you accept.
 struct AssistantPanelView: View {
     let provider: AssistantProvider
@@ -36,7 +36,7 @@ struct AssistantPanelView: View {
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .onAppear { focusComposer += 1 }
-        .onReceive(NotificationCenter.default.publisher(for: .mtermFocusAssistant)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .mootermFocusAssistant)) { _ in
             focusComposer += 1
         }
     }
@@ -236,7 +236,7 @@ struct AssistantPanelView: View {
 
 extension Notification.Name {
     /// Ask the panel to focus its composer (menu shortcut while visible).
-    static let mtermFocusAssistant = Notification.Name("mTerm.focusAssistant")
+    static let mootermFocusAssistant = Notification.Name("mooTerm.focusAssistant")
 }
 
 // MARK: - Pieces
@@ -399,7 +399,7 @@ private struct EmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Ask in plain language — \(providerName) writes the command, you review it, mTerm runs it in the active pane.")
+            Text("Ask in plain language — \(providerName) writes the command, you review it, mooTerm runs it in the active pane.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

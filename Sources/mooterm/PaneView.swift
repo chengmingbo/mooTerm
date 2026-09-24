@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 extension UserDefaults {
-    static let dimInactivePanesKey = "mTerm.dimInactivePanes"
+    static let dimInactivePanesKey = "mooTerm.dimInactivePanes"
 }
 
 /// PaneView: renders a single terminal pane — header on top, terminal

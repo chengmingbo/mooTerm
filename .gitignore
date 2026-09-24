@@ -7,7 +7,7 @@ Package.resolved
 xcuserdata/
 DerivedData/
 # packaging — only the source bits are tracked
-Packaging/mterm.app/Contents/MacOS/mterm
-Packaging/mterm.app/Contents/Resources/
-Packaging/mterm.app/Contents/_CodeSignature/
+Packaging/mooTerm.app/Contents/MacOS/mooterm
+Packaging/mooTerm.app/Contents/Resources/
+Packaging/mooTerm.app/Contents/_CodeSignature/
 .build/

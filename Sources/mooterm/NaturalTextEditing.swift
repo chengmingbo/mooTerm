@@ -25,7 +25,7 @@ enum NaturalTextEditing {
 
     /// Handle `event` if it targets a terminal and matches the preset.
     static func handle(_ event: NSEvent) -> Bool {
-        guard let terminal = event.window?.firstResponder as? MTermTerminalView,
+        guard let terminal = event.window?.firstResponder as? MooTermTerminalView,
               let bytes = bytes(for: event) else { return false }
         terminal.send(bytes)
         return true

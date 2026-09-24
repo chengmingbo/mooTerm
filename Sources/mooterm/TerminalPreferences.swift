@@ -5,14 +5,14 @@ import Combine
 /// to UserDefaults; every open pane picks up changes immediately.
 @MainActor
 final class TerminalPreferences: ObservableObject {
-    static let scrollbackKey = "mTerm.scrollbackLines"
-    static let claudeModelKey = "mTerm.claudeModel"
-    static let proxyModeKey = "mTerm.proxy.mode"
-    static let customProxyKey = "mTerm.proxy.custom"
-    static let proxyInPanesKey = "mTerm.proxy.inPanes"
+    static let scrollbackKey = "mooTerm.scrollbackLines"
+    static let claudeModelKey = "mooTerm.claudeModel"
+    static let proxyModeKey = "mooTerm.proxy.mode"
+    static let customProxyKey = "mooTerm.proxy.custom"
+    static let proxyInPanesKey = "mooTerm.proxy.inPanes"
 
     enum ProxyMode: String, CaseIterable, Identifiable {
-        /// mTerm's launch environment, else the macOS system proxy.
+        /// mooTerm's launch environment, else the macOS system proxy.
         case automatic
         case custom
         case off
@@ -34,8 +34,8 @@ final class TerminalPreferences: ObservableObject {
         }
     }
 
-    static let providerModelsKey = "mTerm.provider.models"
-    static let providerBaseURLsKey = "mTerm.provider.baseURLs"
+    static let providerModelsKey = "mooTerm.provider.models"
+    static let providerBaseURLsKey = "mooTerm.provider.baseURLs"
 
     /// Model per provider (raw value → model id; "" = the tool's default).
     @Published private var providerModels: [String: String] {
@@ -66,7 +66,7 @@ final class TerminalPreferences: ObservableObject {
     var apiProxy: APIProxy {
         switch proxyMode {
         case .automatic:
-            // Explicit variables mTerm was launched with win over the system proxy.
+            // Explicit variables mooTerm was launched with win over the system proxy.
             if let env = ProxyConfiguration.fromEnvironment(ProcessInfo.processInfo.environment) { return .custom(env) }
             return .system
         case .custom: return ProxyConfiguration.custom(customProxy).map(APIProxy.custom) ?? .system
@@ -86,7 +86,7 @@ final class TerminalPreferences: ObservableObject {
         didSet { defaults.set(proxyInPanes, forKey: Self.proxyInPanesKey) }
     }
 
-    /// The proxy mTerm hands to child processes, re-resolved on each call
+    /// The proxy mooTerm hands to child processes, re-resolved on each call
     /// so a system proxy switched on/off later is picked up.
     func effectiveProxy(environment: [String: String] = ProcessInfo.processInfo.environment) -> ProxyConfiguration? {
         switch proxyMode {

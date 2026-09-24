@@ -54,8 +54,8 @@ enum WindowDoubleClick {
 /// flip so the menu checkmarks stay in sync.
 @MainActor
 final class WindowStore: ObservableObject {
-    static let bordersKey = "mTerm.window.borders"
-    static let alwaysOnTopKey = "mTerm.window.alwaysOnTop"
+    static let bordersKey = "mooTerm.window.borders"
+    static let alwaysOnTopKey = "mooTerm.window.alwaysOnTop"
 
     @Published var borders: Bool {
         didSet { UserDefaults.standard.set(borders, forKey: Self.bordersKey) }

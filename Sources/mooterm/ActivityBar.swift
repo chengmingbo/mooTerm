@@ -34,7 +34,7 @@ extension AssistantProvider {
 
 extension UserDefaults {
     /// Raw value of the open `SidebarItem`, or "" when the sidebar is closed.
-    static let sidebarSelectionKey = "mTerm.sidebar.selection"
+    static let sidebarSelectionKey = "mooTerm.sidebar.selection"
 
     static var selectedSidebarItem: SidebarItem? {
         get { standard.string(forKey: sidebarSelectionKey).flatMap(SidebarItem.init(rawValue:)) }

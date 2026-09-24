@@ -1,8 +1,8 @@
 #!/bin/bash
-# Build mterm and assemble Packaging/mterm.app.
+# Build mooterm and assemble Packaging/mooTerm.app.
 #
 # Usage: bash scripts/build.sh [--install]
-#   --install   also replace /Applications/mterm.app
+#   --install   also replace /Applications/mooTerm.app
 #
 # Always re-registers the bundle with LaunchServices: if an .app was ever
 # registered without an icon, Finder/Dock keep showing the generic icon
@@ -19,10 +19,10 @@ echo "==> Building release"
 swift build -c release
 bin_dir="$(swift build -c release --show-bin-path)"
 
-app="$PWD/Packaging/mterm.app"
+app="$PWD/Packaging/mooTerm.app"
 rm -rf "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/_CodeSignature"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$bin_dir/mterm" "$app/Contents/MacOS/mterm"
+cp "$bin_dir/mooterm" "$app/Contents/MacOS/mooterm"
 cp Packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 # SwiftPM resource bundles belong in Contents/Resources — codesign rejects
 # non-Mach-O files under Contents/MacOS.
@@ -40,8 +40,15 @@ refresh "$app"
 echo "Built: $app"
 
 if $install; then
-    dest=/Applications/mterm.app
+    dest=/Applications/mooTerm.app
     rm -rf "$dest"
+    # The app used to be called mTerm; don't leave the old copy behind.
+    legacy=/Applications/mterm.app
+    if [[ -d "$legacy" ]]; then
+        "$lsregister" -u "$legacy" 2>/dev/null || true
+        rm -rf "$legacy"
+        echo "Removed old $legacy"
+    fi
     ditto "$app" "$dest"
     refresh "$dest"
     killall Dock 2>/dev/null || true

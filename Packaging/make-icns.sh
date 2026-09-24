@@ -5,11 +5,11 @@
 #
 # Output:
 #   Packaging/AppIcon.icns                 copied into the .app by scripts/build.sh
-#   Sources/mterm/Resources/AppIcon.icns   SwiftPM resource, so `swift run`
+#   Sources/mooterm/Resources/AppIcon.icns   SwiftPM resource, so `swift run`
 #                                          shows the icon in the Dock too
 set -euo pipefail
 cd "$(dirname "$0")/.."
-src="${1:-Resources/mterm_logo.png}"
+src="${1:-Resources/mooterm_logo.png}"
 [[ -f "$src" ]] || { echo "missing: $src" >&2; exit 1; }
 
 iconset="$(mktemp -d)/AppIcon.iconset"
@@ -20,6 +20,6 @@ for size in 16 32 128 256 512; do
 done
 
 iconutil -c icns "$iconset" -o Packaging/AppIcon.icns
-cp Packaging/AppIcon.icns Sources/mterm/Resources/AppIcon.icns
+cp Packaging/AppIcon.icns Sources/mooterm/Resources/AppIcon.icns
 rm -rf "$(dirname "$iconset")"
-echo "Wrote Packaging/AppIcon.icns and Sources/mterm/Resources/AppIcon.icns"
+echo "Wrote Packaging/AppIcon.icns and Sources/mooterm/Resources/AppIcon.icns"

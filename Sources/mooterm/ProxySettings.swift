@@ -3,7 +3,7 @@ import Foundation
 
 /// Proxy environment for child processes. Command-line tools (claude, curl,
 /// git, npm…) ignore the macOS system proxy and only read `http_proxy`-style
-/// variables, which a Dock-launched app doesn't have. mTerm bridges the two.
+/// variables, which a Dock-launched app doesn't have. mooTerm bridges the two.
 struct ProxyConfiguration: Equatable, Sendable {
     var http: String?
     var https: String?
@@ -44,7 +44,7 @@ struct ProxyConfiguration: Equatable, Sendable {
                                   noProxy: "localhost,127.0.0.1,::1")
     }
 
-    /// Proxy variables already present in an environment (e.g. mTerm was
+    /// Proxy variables already present in an environment (e.g. mooTerm was
     /// launched from a shell that exported them).
     static func fromEnvironment(_ env: [String: String]) -> ProxyConfiguration? {
         func value(_ key: String) -> String? {
@@ -86,7 +86,7 @@ struct ProxyConfiguration: Equatable, Sendable {
         return fromSystemSettings(settings)
     }
 
-    /// Automatic mode: mTerm's own environment first (explicit wins), then
+    /// Automatic mode: mooTerm's own environment first (explicit wins), then
     /// the macOS system proxy.
     static func automatic(environment: [String: String] = ProcessInfo.processInfo.environment) -> ProxyConfiguration? {
         fromEnvironment(environment) ?? system()

@@ -3,10 +3,10 @@ import Darwin
 import SwiftTerm
 import Foundation
 
-/// `LocalProcessTerminalView` with the hooks mTerm needs: output activity
+/// `LocalProcessTerminalView` with the hooks mooTerm needs: output activity
 /// and bell notifications for tab indicators.
 @MainActor
-final class MTermTerminalView: LocalProcessTerminalView {
+final class MooTermTerminalView: LocalProcessTerminalView {
     var onOutput: (() -> Void)?
     var onBell: (() -> Void)?
     var onBecomeFirstResponder: (() -> Void)?
@@ -42,7 +42,7 @@ final class MTermTerminalView: LocalProcessTerminalView {
 /// settings, or session bookkeeping.
 @MainActor
 final class TerminalHostView: NSObject {
-    let view: MTermTerminalView
+    let view: MooTermTerminalView
     private(set) var currentDirectory: URL
     private var processDelegate: ProcessDelegate
 
@@ -58,7 +58,7 @@ final class TerminalHostView: NSObject {
 
     init(startingDirectory: URL) {
         self.currentDirectory = startingDirectory.standardizedFileURL
-        self.view = MTermTerminalView(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
+        self.view = MooTermTerminalView(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
         self.processDelegate = ProcessDelegate()
         super.init()
         self.processDelegate.owner = self

@@ -100,10 +100,10 @@ final class CommandAssistant: ObservableObject {
     let provider: AssistantProvider
     /// Claude keeps the keys it had before other providers existed.
     private var autoRunKey: String {
-        provider == .claude ? "mTerm.assistant.autoRunSafe" : "mTerm.assistant.\(provider.rawValue).autoRunSafe"
+        provider == .claude ? "mooTerm.assistant.autoRunSafe" : "mooTerm.assistant.\(provider.rawValue).autoRunSafe"
     }
     private var entriesKey: String {
-        provider == .claude ? "mTerm.assistant.entries" : "mTerm.assistant.\(provider.rawValue).entries"
+        provider == .claude ? "mooTerm.assistant.entries" : "mooTerm.assistant.\(provider.rawValue).entries"
     }
 
     @Published private(set) var entries: [AssistantEntry] = []
@@ -232,7 +232,7 @@ final class CommandAssistant: ObservableObject {
     // MARK: - Prompt
 
     nonisolated static let systemPrompt = """
-    You are the command assistant inside mTerm, a macOS terminal. Turn the user's \
+    You are the command assistant inside mooTerm, a macOS terminal. Turn the user's \
     natural-language request into ONE shell command line for their shell. Prefer a \
     single pipeline (cmd | cmd | cmd) over multiple statements; use && only when steps \
     depend on each other. Use tools that ship with macOS (BSD find/sed/stat/date, awk, \

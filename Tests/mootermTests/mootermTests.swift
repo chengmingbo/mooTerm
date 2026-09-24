@@ -1,7 +1,7 @@
 import Testing
 import AppKit
 import SwiftUI
-@testable import mterm
+@testable import mooterm
 
 @MainActor
 @Test func splitTreeGrowsOnSplit() {
@@ -57,7 +57,7 @@ import SwiftUI
 }
 
 @Test func colorSchemeStorePersistsSelection() {
-    let defaults = UserDefaults(suiteName: "mterm-test-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-test-\(UUID().uuidString)")!
     defer { defaults.removePersistentDomain(forName: defaults.dictionaryRepresentation().keys.first ?? "") }
     let store = ColorSchemeStore(defaults: defaults)
     #expect(store.current.id == ColorScheme.terminator.id)
@@ -76,7 +76,7 @@ import SwiftUI
 }
 
 @Test func fontSizeStoreClampsAndPersists() {
-    let defaults = UserDefaults(suiteName: "mterm-font-test-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-font-test-\(UUID().uuidString)")!
     let store = FontSizeStore(defaults: defaults)
     #expect(store.size == FontSizeStore.default)
 
@@ -122,7 +122,7 @@ import SwiftUI
 @MainActor
 @Test func layoutStoreSaveAndRestore() throws {
     // Use an isolated temp file so we don't touch the user's real layouts.
-    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("mTermLayoutTest-\(UUID().uuidString)")
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("mooTermLayoutTest-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -279,7 +279,7 @@ private func keyEvent(_ chars: String, _ ignoring: String, _ mods: NSEvent.Modif
 @Test func controlKeysReachTheShell() {
     // ⌃A / ⌃E / ⌃L / ⌃R / ⌃U are handled by the shell's line editor; the
     // terminal just has to deliver the raw control byte.
-    let view = MTermTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+    let view = MooTermTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
     var sent: [UInt8] = []
     view.onInput = { sent += $0 }
     for (letter, byte) in [("a", 0x01), ("e", 0x05), ("l", 0x0C), ("r", 0x12), ("u", 0x15)] as [(String, UInt8)] {
@@ -328,7 +328,7 @@ private func feedLines(_ host: TerminalHostView, _ count: Int) {
 
 @MainActor
 @Test func terminalPreferencesClampAndPersistScrollback() {
-    let defaults = UserDefaults(suiteName: "mterm-prefs-test-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-prefs-test-\(UUID().uuidString)")!
     let prefs = TerminalPreferences(defaults: defaults)
     #expect(prefs.scrollbackLines == TerminalPreferences.defaultScrollback)
     prefs.scrollbackLines = 25_000
@@ -433,7 +433,7 @@ private final class StubTranslator: CommandTranslator, @unchecked Sendable {
 @MainActor
 private func stubbedAssistant(_ reply: [String: Any], provider: AssistantProvider = .claude) -> CommandAssistant {
     let assistant = CommandAssistant(provider: provider,
-                                     defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
+                                     defaults: UserDefaults(suiteName: "mooterm-assistant-\(UUID().uuidString)")!)
     let parsed = CommandReply(json: reply) ?? CommandReply(command: nil, explanation: "", risk: "safe")
     assistant.makeTranslator = { StubTranslator(.success(parsed)) }
     return assistant
@@ -487,7 +487,7 @@ private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: 
     let launch = LoginShellProcess.launch(tool: "claude", arguments: ["--print"])
     #expect(launch.arguments.prefix(3) == ["-l", "-i", "-c"])
     #expect(launch.arguments[3].contains(#"then claude "$@""#))
-    #expect(launch.arguments.suffix(2) == ["mterm-claude", "--print"])
+    #expect(launch.arguments.suffix(2) == ["mooterm-claude", "--print"])
     #expect(LoginShellProcess.launch(tool: "codex", arguments: []).arguments[3].contains(#"then codex "$@""#))
     #expect(AssistantFailure.failed("Failed to authenticate. API Error: 403 Request not allowed").message.contains("proxy"))
 }
@@ -515,9 +515,9 @@ private func expectLiveReply(_ name: String, _ result: Result<CommandReply, Assi
 
 /// Opt-in end-to-end checks against the real services. Strip proxy
 /// variables to mimic a Dock-launched app, e.g.
-/// `env -u http_proxy -u https_proxy MTERM_LIVE=claude,deepseek swift test --filter live`
+/// `env -u http_proxy -u https_proxy MOOTERM_LIVE=claude,deepseek swift test --filter live`
 private func liveEnabled(_ name: String) -> Bool {
-    (ProcessInfo.processInfo.environment["MTERM_LIVE"] ?? "").split(separator: ",").contains { $0 == name }
+    (ProcessInfo.processInfo.environment["MOOTERM_LIVE"] ?? "").split(separator: ",").contains { $0 == name }
 }
 
 @Test(.enabled(if: liveEnabled("claude")))
@@ -574,7 +574,7 @@ func liveDeepSeekTranslatesARequest() async {
 
 @MainActor
 @Test func proxyPreferencesDriveClaudeAndPaneEnvironments() {
-    let defaults = UserDefaults(suiteName: "mterm-proxy-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-proxy-\(UUID().uuidString)")!
     let prefs = TerminalPreferences(defaults: defaults)
     #expect(prefs.proxyMode == .automatic)
     #expect(!prefs.proxyInPanes, "panes keep their own proxy setup by default")
@@ -595,7 +595,7 @@ func liveDeepSeekTranslatesARequest() async {
 @MainActor
 @Test func assistantPassesOptionsToTheBackend() async {
     let assistant = CommandAssistant(provider: .deepseek,
-                                     defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
+                                     defaults: UserDefaults(suiteName: "mooterm-assistant-\(UUID().uuidString)")!)
     nonisolated(unsafe) var seen: TranslationRequest?
     assistant.makeTranslator = {
         let stub = StubTranslator(.success(CommandReply(command: "ls", explanation: "", risk: "safe")))
@@ -689,7 +689,7 @@ func liveDeepSeekTranslatesARequest() async {
 }
 
 @Test func apiKeysAreStoredPrivately() throws {
-    let file = FileManager.default.temporaryDirectory.appendingPathComponent("mterm-keys-\(UUID().uuidString)/credentials.json")
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("mooterm-keys-\(UUID().uuidString)/credentials.json")
     defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
     APIKeyStore.save("  sk-abc  ", for: .deepseek, file: file)
     #expect(APIKeyStore.savedKey(for: .deepseek, file: file) == "sk-abc")
@@ -701,13 +701,13 @@ func liveDeepSeekTranslatesARequest() async {
 }
 
 @Test func loginShellVariableIgnoresBanners() {
-    #expect(APIKeyStore.parseMarkedValue("HTTP proxy set\n\nMTERM_ENV_VALUE=sk-123\n") == "sk-123")
-    #expect(APIKeyStore.parseMarkedValue("Welcome!\n\nMTERM_ENV_VALUE=\n") == nil, "unset variable, not the banner")
+    #expect(APIKeyStore.parseMarkedValue("HTTP proxy set\n\nMOOTERM_ENV_VALUE=sk-123\n") == "sk-123")
+    #expect(APIKeyStore.parseMarkedValue("Welcome!\n\nMOOTERM_ENV_VALUE=\n") == nil, "unset variable, not the banner")
 }
 
 @MainActor
 @Test func providerPreferencesHaveDefaultsAndMigrateClaudeModel() {
-    let defaults = UserDefaults(suiteName: "mterm-provider-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-provider-\(UUID().uuidString)")!
     defaults.set("sonnet", forKey: TerminalPreferences.claudeModelKey)
     let prefs = TerminalPreferences(defaults: defaults)
     #expect(prefs.model(for: .claude) == "sonnet", "old single Claude model setting carries over")
@@ -723,7 +723,7 @@ func liveDeepSeekTranslatesARequest() async {
 
 @MainActor
 @Test func eachProviderKeepsItsOwnConversation() async {
-    let defaults = UserDefaults(suiteName: "mterm-hub-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: "mooterm-hub-\(UUID().uuidString)")!
     let hub = AssistantHub(defaults: defaults)
     #expect(Set(hub.assistants.keys) == Set(AssistantProvider.allCases))
     _ = await hub[.codex].submit("!ls", context: sampleContext, options: haiku)
@@ -759,7 +759,7 @@ func liveDeepSeekTranslatesARequest() async {
 }
 
 @MainActor
-@Test func zoomChangesAWindowBuiltLikeMTerms() throws {
+@Test func zoomChangesAWindowBuiltLikeMooTerms() throws {
     try #require(NSScreen.main != nil, "needs a display")
     let content = Color.clear.frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
                                     minHeight: 480, idealHeight: 600, maxHeight: .infinity)
@@ -840,4 +840,31 @@ private func sendDoubleClick(to window: NSWindow, at point: NSPoint) {
     #expect(doubles == 1 && singles == 1)
     sendDoubleClick(to: window, at: NSPoint(x: 60, y: 15))    // over the title text
     #expect(doubles == 2, "labels don't swallow the double-click")
+}
+
+// MARK: - Rename (mTerm → mooTerm)
+
+@Test func renameMigrationCarriesOldSettingsOver() {
+    let migrated = RenameMigration.migratedKeys([
+        "mTerm.fontSize": 18.0,
+        "mTerm.colorScheme": "solarized-dark",
+        "NSWindow Frame main": "ignored",
+    ])
+    #expect(migrated["mooTerm.fontSize"] as? Double == 18.0)
+    #expect(migrated["mooTerm.colorScheme"] as? String == "solarized-dark")
+    #expect(migrated.count == 2, "only the app's own keys move")
+}
+
+@Test func renameMigrationCopiesIntoAFreshStoreOnce() {
+    // Throwaway domains only — never the real local.mterm.app settings.
+    let oldDomain = "mooterm-test-old-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: "mooterm-test-new-\(UUID().uuidString)")!
+    defaults.setPersistentDomain(["mTerm.fontSize": 20.0], forName: oldDomain)
+    defer { defaults.removePersistentDomain(forName: oldDomain) }
+    RenameMigration.run(defaults: defaults, fromDomains: [oldDomain], moveFiles: false)
+    #expect(defaults.double(forKey: "mooTerm.fontSize") == 20.0)
+    #expect(defaults.bool(forKey: RenameMigration.doneKey))
+    defaults.setPersistentDomain(["mTerm.fontSize": 9.0], forName: oldDomain)
+    RenameMigration.run(defaults: defaults, fromDomains: [oldDomain], moveFiles: false)
+    #expect(defaults.double(forKey: "mooTerm.fontSize") == 20.0, "runs once")
 }

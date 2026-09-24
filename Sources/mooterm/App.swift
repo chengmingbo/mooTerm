@@ -9,7 +9,7 @@ import AppKit
 private var appDelegateStrongRef: AppDelegate?
 
 @main
-enum mTermMain {
+enum MooTermMain {
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
@@ -36,14 +36,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     weak var windowMenu: NSMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        RenameMigration.run()
         Self.applyAppIcon()
         // 0.2: the Claude panel's own visibility flag became the sidebar
         // selection when the activity bar arrived.
-        if UserDefaults.standard.object(forKey: "mTerm.assistant.visible") != nil {
-            if UserDefaults.standard.bool(forKey: "mTerm.assistant.visible") {
+        if UserDefaults.standard.object(forKey: "mooTerm.assistant.visible") != nil {
+            if UserDefaults.standard.bool(forKey: "mooTerm.assistant.visible") {
                 UserDefaults.selectedSidebarItem = .claude
             }
-            UserDefaults.standard.removeObject(forKey: "mTerm.assistant.visible")
+            UserDefaults.standard.removeObject(forKey: "mooTerm.assistant.visible")
         }
         sessionStore = SessionStore()
         schemeStore = ColorSchemeStore()
@@ -73,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             defer: false
         )
         win.contentViewController = hosting
-        win.title = "mTerm"
+        win.title = "mooTerm"
         win.setContentSize(NSSize(width: 900, height: 600))
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -90,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // commands (split, close, find) target what the user is looking at.
         firstResponderObservation = win.observe(\.firstResponder, options: [.new]) { window, _ in
             MainActor.assumeIsolated {
-                (window.firstResponder as? MTermTerminalView)?.onBecomeFirstResponder?()
+                (window.firstResponder as? MooTermTerminalView)?.onBecomeFirstResponder?()
             }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -105,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Quitting kills every shell, so confirm when programs are running.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        CloseConfirmation.confirm(closing: "mTerm", running: sessionStore.runningProcessNames)
+        CloseConfirmation.confirm(closing: "mooTerm", running: sessionStore.runningProcessNames)
             ? .terminateNow : .terminateCancel
     }
 
@@ -121,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
-        let about = NSMenuItem(title: "About mTerm", action: #selector(aboutAction), keyEquivalent: "")
+        let about = NSMenuItem(title: "About mooTerm", action: #selector(aboutAction), keyEquivalent: "")
         about.target = self
         appMenu.addItem(about)
         appMenu.addItem(NSMenuItem.separator())
@@ -129,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         settings.target = self
         appMenu.addItem(settings)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(NSMenuItem(title: "Quit mTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.addItem(NSMenuItem(title: "Quit mooTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         // File
         let fileItem = NSMenuItem()
@@ -402,9 +403,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func toggleSidebarAction(_ sender: NSMenuItem) {
         guard let item = (sender.representedObject as? String).flatMap(SidebarItem.init(rawValue:)) else { return }
         let visible = UserDefaults.selectedSidebarItem == item
-        let terminalFocused = window?.firstResponder is MTermTerminalView
+        let terminalFocused = window?.firstResponder is MooTermTerminalView
         if visible && terminalFocused {
-            NotificationCenter.default.post(name: .mtermFocusAssistant, object: nil)
+            NotificationCenter.default.post(name: .mootermFocusAssistant, object: nil)
         } else {
             UserDefaults.selectedSidebarItem = visible ? nil : item
             if visible, let view = sessionStore.activeTab?.activePane?.host?.view {
@@ -420,7 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 .environmentObject(fontSizeStore)
                 .environmentObject(schemeStore)
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-            window.title = "mTerm Settings"
+            window.title = "mooTerm Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
@@ -433,7 +434,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? Self.version
         var options: [NSApplication.AboutPanelOptionKey: Any] = [
-            .applicationName: "mTerm",
+            .applicationName: "mooTerm",
             .applicationVersion: version,
             .version: info?["CFBundleVersion"] as? String ?? "dev",
         ]
@@ -443,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     /// Fallback shown by About when running outside the .app (`swift run`).
-    /// Keep in sync with Packaging/mterm.app/Contents/Info.plist.
+    /// Keep in sync with Packaging/mooTerm.app/Contents/Info.plist.
     static let version = "0.2.0"
     @objc func broadcastAction() { sessionStore.activeTab?.toggleBroadcast() }
 
@@ -593,12 +594,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    /// Append a line to ~/Library/Logs/mTerm.log. Used for ad-hoc debugging; the
+    /// Append a line to ~/Library/Logs/mooTerm.log. Used for ad-hoc debugging; the
     /// menu / theme / font subsystems no longer call it during normal flow.
     nonisolated static let logURL: URL = {
         let home = NSHomeDirectory()
         return URL(fileURLWithPath: home)
-            .appendingPathComponent("Library/Logs/mTerm.log")
+            .appendingPathComponent("Library/Logs/mooTerm.log")
     }()
 
     nonisolated static func log(_ message: String) {
@@ -626,7 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard Bundle.main.url(forResource: "AppIcon", withExtension: "icns") == nil else { return }
         let resourceBundle = Bundle.main.executableURL?
             .deletingLastPathComponent()
-            .appendingPathComponent("mterm_mterm.bundle")
+            .appendingPathComponent("mooterm_mooterm.bundle")
         guard let bundle = resourceBundle.flatMap(Bundle.init(url:)),
               let url = bundle.url(forResource: "AppIcon", withExtension: "icns"),
               let image = NSImage(contentsOf: url) else { return }

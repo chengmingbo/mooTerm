@@ -5,7 +5,7 @@ import Foundation
 /// `TerminalHost` reads every `updateNSView` pass. Clamps to a sane range
 /// so a stray menu spam can't make the terminal invisible.
 final class FontSizeStore: ObservableObject {
-    static let storageKey = "mTerm.fontSize"
+    static let storageKey = "mooTerm.fontSize"
 
     static let minSize: CGFloat = 8
     static let maxSize: CGFloat = 32

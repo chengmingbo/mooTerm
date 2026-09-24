@@ -1,4 +1,4 @@
-# mTerm — macOS native port of Terminator
+# mooTerm — macOS native port of Terminator
 
 A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.
@@ -10,9 +10,9 @@ Arranges terminals in a grid of resizable panes with broadcast-group support, li
 ## Build & run
 
 ```sh
-git clone https://github.com/chengmingbo/mterm.git
-cd mterm
-swift run mterm
+git clone https://github.com/chengmingbo/mooTerm.git
+cd mooTerm
+swift run mooterm
 ```
 
 Requires macOS 13+, Xcode 16 / Swift 6 toolchain. SwiftTerm 1.20.0 is fetched
@@ -81,7 +81,7 @@ pane, and keeps its own conversation:
 
 CLIs run through your login shell by name, so your aliases apply. Models,
 endpoints, and keys are in Settings → Assistants. Keys pasted there are saved
-to `~/Library/Application Support/mTerm/credentials.json` (mode 600).
+to `~/Library/Application Support/mooTerm/credentials.json` (mode 600).
 
 Using a panel:
 
@@ -117,15 +117,15 @@ Details:
 ## Build a .app
 
 ```sh
-bash scripts/build.sh            # Packaging/mterm.app
-bash scripts/build.sh --install  # also replace /Applications/mterm.app
-bash Packaging/make-icns.sh      # regenerate the icon from Resources/mterm_logo.png
+bash scripts/build.sh            # Packaging/mooTerm.app
+bash scripts/build.sh --install  # also replace /Applications/mooTerm.app
+bash Packaging/make-icns.sh      # regenerate the icon from Resources/mooterm_logo.png
 ```
 
 ## Architecture
 
 ```
-Sources/mterm/
+Sources/mooterm/
 ├── App.swift                AppDelegate, menus, focus sync, quit confirmation
 ├── ContentView.swift        Tab bar + recursive split tree with draggable dividers
 ├── TabSession.swift         One tab: split tree, active pane, navigation, broadcast

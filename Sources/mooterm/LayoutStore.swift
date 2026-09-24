@@ -111,7 +111,7 @@ struct SavedLayout: Codable, Equatable, Identifiable {
 }
 
 /// Persisted store of layouts. One JSON file under
-/// `~/Library/Application Support/mTerm/layouts.json`.
+/// `~/Library/Application Support/mooTerm/layouts.json`.
 @MainActor
 final class LayoutStore: ObservableObject {
     static let storageFileName = "layouts.json"
@@ -129,10 +129,10 @@ final class LayoutStore: ObservableObject {
                                                  in: .userDomainMask,
                                                  appropriateFor: nil,
                                                  create: true) {
-            base = appSupport.appendingPathComponent("mTerm", isDirectory: true)
+            base = appSupport.appendingPathComponent("mooTerm", isDirectory: true)
         } else {
             base = fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/mTerm", isDirectory: true)
+                .appendingPathComponent("Library/Application Support/mooTerm", isDirectory: true)
         }
         self.storageURL = base.appendingPathComponent(Self.storageFileName)
         load()
@@ -207,7 +207,7 @@ final class LayoutStore: ObservableObject {
         persist()
     }
 
-    /// Find a layout by name (case-insensitive). Useful for `mterm --layout foo`.
+    /// Find a layout by name (case-insensitive). Useful for `mooterm --layout foo`.
     func layout(named name: String) -> SavedLayout? {
         layouts.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
     }
@@ -222,7 +222,7 @@ final class LayoutStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             self.layouts = try decoder.decode([SavedLayout].self, from: data)
         } catch {
-            AppDelegate.log("[mTerm] LayoutStore.load failed: \(error)")
+            AppDelegate.log("[mooTerm] LayoutStore.load failed: \(error)")
         }
     }
 
@@ -236,7 +236,7 @@ final class LayoutStore: ObservableObject {
             let data = try encoder.encode(layouts)
             try data.write(to: storageURL, options: .atomic)
         } catch {
-            AppDelegate.log("[mTerm] LayoutStore.persist failed: \(error)")
+            AppDelegate.log("[mooTerm] LayoutStore.persist failed: \(error)")
         }
     }
 

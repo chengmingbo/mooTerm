@@ -137,7 +137,7 @@ extension NSColor {
 /// Persisted active scheme. Stored as the scheme id so future additions to
 /// `ColorScheme.all` don't lose their preference.
 final class ColorSchemeStore: ObservableObject {
-    static let storageKey = "mTerm.colorScheme"
+    static let storageKey = "mooTerm.colorScheme"
 
     @Published private(set) var current: ColorScheme
     private let defaults: UserDefaults

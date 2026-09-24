@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "mterm",
+    name: "mooterm",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "mterm", targets: ["mterm"]),
+        .executable(name: "mooterm", targets: ["mooterm"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
     ],
     targets: [
         .executableTarget(
-            name: "mterm",
+            name: "mooterm",
             dependencies: ["SwiftTerm"],
-            path: "Sources/mterm",
+            path: "Sources/mooterm",
             resources: [
                 .copy("Resources/AppIcon.icns")
             ],
@@ -23,9 +23,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "mtermTests",
-            dependencies: ["mterm"],
-            path: "Tests/mtermTests",
+            name: "mootermTests",
+            dependencies: ["mooterm"],
+            path: "Tests/mootermTests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]

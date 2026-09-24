@@ -85,14 +85,14 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Sendable {
 
 /// API keys for HTTP providers. Keys typed in Settings live in a 0600 file
 /// in Application Support (the Keychain would re-prompt after every ad-hoc
-/// rebuild); otherwise the provider's variable from mTerm's environment or
+/// rebuild); otherwise the provider's variable from mooTerm's environment or
 /// the user's login shell (e.g. `export DEEPSEEK_API_KEY=…` in ~/.zshrc).
 enum APIKeyStore {
     static var fileURL: URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                   appropriateFor: nil, create: true))
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("mTerm/credentials.json")
+        return base.appendingPathComponent("mooTerm/credentials.json")
     }
 
     static func savedKey(for provider: AssistantProvider, file: URL = fileURL) -> String? {
@@ -113,16 +113,16 @@ enum APIKeyStore {
             try JSONEncoder().encode(keys).write(to: file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         } catch {
-            AppDelegate.log("[mTerm] APIKeyStore.save failed: \(error)")
+            AppDelegate.log("[mooTerm] APIKeyStore.save failed: \(error)")
         }
     }
 
     /// Where the key will come from, for Settings. Doesn't spawn a shell.
     static func source(for provider: AssistantProvider) -> String? {
-        if savedKey(for: provider) != nil { return "saved in mTerm" }
+        if savedKey(for: provider) != nil { return "saved in mooTerm" }
         if let variable = provider.apiKeyVariable,
            ProcessInfo.processInfo.environment[variable]?.isEmpty == false {
-            return "$\(variable) (mTerm's environment)"
+            return "$\(variable) (mooTerm's environment)"
         }
         return nil
     }
@@ -136,7 +136,7 @@ enum APIKeyStore {
     }
 
     /// Prefix that tells the value apart from anything rc files print.
-    static let marker = "MTERM_ENV_VALUE="
+    static let marker = "MOOTERM_ENV_VALUE="
 
     static func parseMarkedValue(_ output: String) -> String? {
         guard let line = output.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix(marker) }) else { return nil }
@@ -154,7 +154,7 @@ enum APIKeyStore {
         cacheLock.unlock()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: TerminalHostView.resolveLoginShell())
-        process.arguments = ["-l", "-i", "-c", #"printf '\n%s%s\n' "$2" "$(printenv "$1")""#, "mterm-env", name, marker]
+        process.arguments = ["-l", "-i", "-c", #"printf '\n%s%s\n' "$2" "$(printenv "$1")""#, "mooterm-env", name, marker]
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
