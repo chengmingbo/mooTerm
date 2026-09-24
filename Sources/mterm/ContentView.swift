@@ -54,8 +54,10 @@ struct ContentView: View {
             }
             // Empty tab-bar space acts like a title bar: double-click zooms
             // the window (or whatever System Settings says it should do).
+            // Color is greedy in both directions, so pin its height or it
+            // stretches the tab bar to half the window.
             Color.clear
-                .frame(minWidth: 4, maxWidth: .infinity, minHeight: 20)
+                .frame(minWidth: 4, maxWidth: .infinity, minHeight: 20, maxHeight: 20)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { WindowDoubleClick.perform(on: NSApp.keyWindow) }
             Button { store.newTab() } label: {
@@ -65,6 +67,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8).padding(.vertical, 4)
+        .fixedSize(horizontal: false, vertical: true)
         .sheet(item: $renamingTab) { context in
             RenameTabSheet(tab: context.tab, original: context.original) { newName in
                 if let newName, !newName.isEmpty {
