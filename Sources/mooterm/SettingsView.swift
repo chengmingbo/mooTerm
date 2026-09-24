@@ -99,7 +99,7 @@ struct SettingsView: View {
 
             Section {
                 Stepper {
-                    Text("Font size: \(Int(fontSizeStore.size)) pt")
+                    Text("Default font size: \(Int(fontSizeStore.size)) pt")
                 } onIncrement: {
                     fontSizeStore.increase()
                 } onDecrement: {

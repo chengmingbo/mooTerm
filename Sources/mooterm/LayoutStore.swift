@@ -54,6 +54,8 @@ struct LayoutPane: Codable, Equatable {
     let shellID: String?
     let customCommand: String?
     let accent: String?
+    /// Per-pane font size offset (⌘= / ⌘-); absent in older layouts.
+    var fontSizeOffset: Double? = nil
 }
 
 /// One tab in a saved layout.
@@ -250,7 +252,8 @@ final class LayoutStore: ObservableObject {
                 cwd: pane.cwd,
                 shellID: pane.shellID,
                 customCommand: pane.customCommand,
-                accent: nil
+                accent: nil,
+                fontSizeOffset: pane.fontSizeOffset == 0 ? nil : Double(pane.fontSizeOffset)
             ))
         }
         let dirString: String
@@ -271,6 +274,7 @@ final class LayoutStore: ObservableObject {
             pane.cwd = paneData.cwd
             pane.shellID = paneData.shellID
             pane.customCommand = paneData.customCommand
+            pane.fontSizeOffset = CGFloat(paneData.fontSizeOffset ?? 0)
             return SplitNode(pane: pane)
         case let .split(dir, ratio, first, second):
             let direction: SplitDirection = (dir == "h") ? .horizontal : .vertical

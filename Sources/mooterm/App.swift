@@ -272,7 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(unzoom)
         viewMenu.addItem(NSMenuItem.separator())
 
-        // Font size — ⌘= (the conventional ⌘+), ⌘- to shrink, ⌘0 to reset.
+        // Font size, like iTerm2: ⌘= / ⌘+ / ⌘- / ⌘0 change only the active
+        // pane; add ⌥ to change every pane (the default in Settings).
         let bigger = NSMenuItem(title: "Bigger Font", action: #selector(biggerFontAction), keyEquivalent: "=")
         bigger.keyEquivalentModifierMask = [.command]
         bigger.target = self
@@ -291,6 +292,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         resetFont.keyEquivalentModifierMask = [.command]
         resetFont.target = self
         viewMenu.addItem(resetFont)
+        for (title, key, action) in [("Bigger Font (All Panes)", "=", #selector(biggerFontAllAction)),
+                                     ("Smaller Font (All Panes)", "-", #selector(smallerFontAllAction)),
+                                     ("Reset Font Size (All Panes)", "0", #selector(resetFontAllAction))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.target = self
+            viewMenu.addItem(item)
+        }
 
         // Layouts menu — dynamic contents; rebuilt when the store changes.
         let layoutsItem = NSMenuItem()
@@ -511,14 +520,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         refreshThemeMenuCheckmarks()
     }
 
+    /// ⌥⌘= / ⌥⌘-: every pane (changes the default in Settings).
+    @objc func biggerFontAllAction() { fontSizeStore.increase() }
+    @objc func smallerFontAllAction() { fontSizeStore.decrease() }
+    /// ⌥⌘0: back to the standard size everywhere, dropping per-pane sizes.
+    @objc func resetFontAllAction() {
+        fontSizeStore.reset()
+        sessionStore.tabs.flatMap(\.panes).forEach { $0.fontSizeOffset = 0 }
+    }
+
+    /// ⌘= / ⌘- / ⌘0: the active pane only.
     @objc func biggerFontAction() {
-        fontSizeStore.increase()
+        sessionStore.activeTab?.activePane?.adjustFontSize(by: FontSizeStore.step, globalSize: fontSizeStore.size)
     }
     @objc func smallerFontAction() {
-        fontSizeStore.decrease()
+        sessionStore.activeTab?.activePane?.adjustFontSize(by: -FontSizeStore.step, globalSize: fontSizeStore.size)
     }
     @objc func resetFontAction() {
-        fontSizeStore.reset()
+        sessionStore.activeTab?.activePane?.fontSizeOffset = 0
     }
 
     @objc func toggleBordersAction() {

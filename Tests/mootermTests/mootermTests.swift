@@ -1119,3 +1119,55 @@ private func findView<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
     for sub in root.subviews { if let found = findView(type, in: sub) { return found } }
     return nil
 }
+
+// MARK: - Per-pane font size
+
+@MainActor
+@Test func paneFontSizeIsRelativeAndClamped() {
+    let pane = Pane(cwd: NSTemporaryDirectory())
+    pane.adjustFontSize(by: 1, globalSize: 13)
+    pane.adjustFontSize(by: 1, globalSize: 13)
+    #expect(pane.fontSizeOffset == 2)
+    let fonts = FontSizeStore(defaults: UserDefaults(suiteName: "mooterm-pfs-\(UUID().uuidString)")!)
+    #expect(fonts.size(forOffset: pane.fontSizeOffset) == 15)
+    fonts.increase()   // ⌥⌘=: the default moves, the pane keeps its +2
+    #expect(fonts.size(forOffset: pane.fontSizeOffset) == 16)
+    for _ in 0..<100 { pane.adjustFontSize(by: 1, globalSize: fonts.size) }
+    #expect(fonts.size(forOffset: pane.fontSizeOffset) == FontSizeStore.maxSize, "clamped at the maximum")
+    for _ in 0..<100 { pane.adjustFontSize(by: -1, globalSize: fonts.size) }
+    #expect(fonts.size(forOffset: pane.fontSizeOffset) == FontSizeStore.minSize, "clamped at the minimum")
+}
+
+@MainActor
+@Test func onlyTheAdjustedPaneChangesSize() {
+    let store = SessionStore()
+    let tab = store.activeTab!
+    let window = renderTab(tab, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
+    let left = tab.panes[0]
+    tab.split(.vertical); settle()
+    let right = tab.activePane!
+    let before = left.host!.view.font.pointSize
+    #expect(right.host!.view.font.pointSize == before)
+
+    right.adjustFontSize(by: 3, globalSize: FontSizeStore.default); settle()
+    #expect(right.host!.view.font.pointSize == before + 3, "active pane grew")
+    #expect(left.host!.view.font.pointSize == before, "other pane unchanged")
+
+    right.fontSizeOffset = 0; settle()   // ⌘0
+    #expect(right.host!.view.font.pointSize == before)
+}
+
+@MainActor
+@Test func savedLayoutsKeepPaneFontSizes() {
+    let session = SessionStore()
+    let tab = session.activeTab!
+    tab.split(.vertical)
+    tab.activePane!.fontSizeOffset = 4
+    let saved = LayoutStore.snapshot(of: session, name: "fonts")
+    let fresh = SessionStore()
+    LayoutStore().restore(saved, into: fresh)
+    #expect(fresh.activeTab!.panes.map(\.fontSizeOffset).sorted() == [0, 4])
+    fresh.tabs.forEach { $0.terminate() }
+}

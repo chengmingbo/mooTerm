@@ -56,7 +56,8 @@ at build time.
 | Toggle broadcast group | ⇧⌘G |
 | Find / next / previous / use selection | ⌘F / ⌘G / ⇧⌘G / ⌘E |
 | Clear buffer (screen + scrollback) | ⌘K |
-| Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
+| Bigger / smaller / reset font — **this pane only** | ⌘= or ⌘+ / ⌘- / ⌘0 |
+| Bigger / smaller / reset font — all panes (the default size) | ⌥⌘= / ⌥⌘- / ⌥⌘0 |
 | Save layout | ⇧⌘S |
 | Settings (scrollback lines, font, theme, dimming, Claude model) | ⌘, |
 | Assistant panels in bar order (Claude, Codex, DeepSeek, MiniMax, then custom) | ⌃⌘1 … ⌃⌘9 (Claude also ⇧⌘A) |
@@ -73,6 +74,9 @@ Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 | ⌥⌫ / ⌥⌦ | Delete previous / next word |
 
 Control keys such as ⌃A, ⌃E, ⌃L, ⌃R, ⌃U go to the shell unchanged.
+
+A pane with its own font size shows it in its header (e.g. `16 pt`); click
+the badge or press ⌘0 to go back to the default.
 
 Drag a divider to resize panes; double-click it to split evenly. Clicking
 into a pane makes it active (its border is highlighted; View → Dim Inactive Panes

@@ -14,6 +14,15 @@ final class Pane: ObservableObject, Identifiable {
     @Published var hasUnseenOutput = false
     /// The shell rang the bell since the user last looked at this pane's tab.
     @Published var bellRang = false
+    /// Points added to the global font size for this pane only (⌘= / ⌘-).
+    /// Stored relative, so changing the global size still moves this pane.
+    @Published var fontSizeOffset: CGFloat = 0
+
+    /// ⌘= / ⌘- on this pane: step its size, keeping the result in range.
+    func adjustFontSize(by step: CGFloat, globalSize: CGFloat) {
+        let target = FontSizeStore.clamp(globalSize + fontSizeOffset + step)
+        fontSizeOffset = target - globalSize
+    }
     /// Members of the same broadcast group share a shellID. nil = no group.
     var shellID: String? = nil
     /// Optional command to launch instead of the user's default shell when

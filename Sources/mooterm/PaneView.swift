@@ -37,7 +37,8 @@ struct PaneView: View {
 
     private var terminal: some View {
         // Zoom (⌘⇧Z) bumps the font size by 2pt; maximise (⌘⇧X) keeps it.
-        let effectiveSize = tab.zoomBumpsFont ? fontSizeStore.size + 2 : fontSizeStore.size
+        let paneSize = fontSizeStore.size(forOffset: pane.fontSizeOffset)
+        let effectiveSize = tab.zoomBumpsFont ? paneSize + 2 : paneSize
         return TerminalHost(
             pane: pane,
             isFocused: isActive,
@@ -85,6 +86,20 @@ struct PaneView: View {
                 }
             }
             .allowsHitTesting(false)
+            if pane.fontSizeOffset != 0 {
+                // This pane has its own size (⌘= / ⌘-); click to reset.
+                Button {
+                    pane.fontSizeOffset = 0
+                } label: {
+                    Text("\(Int(fontSizeStore.size(forOffset: pane.fontSizeOffset))) pt")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("This pane's font size (others use \(Int(fontSizeStore.size)) pt). Click or press ⌘0 to reset.")
+            }
             Button { tab.split(.horizontal, pane: pane.id) } label: {
                 Image(systemName: "rectangle.split.1x2").font(.system(size: 10))
             }

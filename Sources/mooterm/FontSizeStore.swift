@@ -25,6 +25,12 @@ final class FontSizeStore: ObservableObject {
         }
     }
 
+    /// Clamp any font size into the allowed range.
+    static func clamp(_ size: CGFloat) -> CGFloat { size.clamped(to: minSize...maxSize) }
+
+    /// A pane's size: the global default plus the pane's own offset.
+    func size(forOffset offset: CGFloat) -> CGFloat { Self.clamp(size + offset) }
+
     func increase() { set(size + Self.step) }
     func decrease() { set(size - Self.step) }
     func reset() { set(Self.default) }
