@@ -7,8 +7,6 @@
 <p align="center"><b>A native macOS terminal with split panes, broadcast groups, and AI command panels.</b><br>
 Moo — like the cow.</p>
 
-# mooTerm — macOS native port of Terminator
-
 A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.
 
