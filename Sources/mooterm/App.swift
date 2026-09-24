@@ -472,7 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ]
         if let icon = NSApp.applicationIconImage { options[.applicationIcon] = icon }
         options[.credits] = NSAttributedString(
-            string: "Copyright © 2026 chengmingbo.\nLicensed under the PolyForm Noncommercial License 1.0.0: free for personal, research, and educational use; commercial use requires permission.\n\nTerminal emulation by SwiftTerm (MIT).",
+            string: "Author: Mingbo Cheng\nCopyright © 2026 Mingbo Cheng.\n\nLicensed under the PolyForm Noncommercial License 1.0.0: free for personal, research, and educational use; commercial use requires permission.\n\nTerminal emulation by SwiftTerm (MIT).",
             attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                          .foregroundColor: NSColor.secondaryLabelColor])
         NSApp.activate(ignoringOtherApps: true)

@@ -1,4 +1,4 @@
-Required Notice: Copyright 2026 chengmingbo (https://github.com/chengmingbo/mooTerm)
+Required Notice: Copyright 2026 Mingbo Cheng (https://github.com/chengmingbo/mooTerm)
 
 # PolyForm Noncommercial License 1.0.0
 

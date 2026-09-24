@@ -194,7 +194,7 @@ Sources/mooterm/
 
 ## License
 
-Copyright 2026 chengmingbo.
+Copyright 2026 Mingbo Cheng.
 
 mooTerm is **source-available, not for commercial use**. It is licensed under
 the [PolyForm Noncommercial License 1.0.0](LICENSE.md):
@@ -205,7 +205,7 @@ the [PolyForm Noncommercial License 1.0.0](LICENSE.md):
   product or service, or using it to make money — without separate
   permission from the author.
 
-For a commercial license, contact the author through
+For a commercial license, contact the author, Mingbo Cheng, through
 [GitHub](https://github.com/chengmingbo).
 
 Third-party components keep their own licenses; see
