@@ -420,7 +420,7 @@ private func feedLines(_ host: TerminalHostView, _ count: Int) {
 private func stubbedAssistant(_ reply: [String: Any]) -> CommandAssistant {
     let assistant = CommandAssistant(defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
     nonisolated(unsafe) let reply = reply
-    assistant.translate = { _, _, _, _ in .success(reply) }
+    assistant.translate = { _, _, _, _, _ in .success(reply) }
     return assistant
 }
 
@@ -445,7 +445,7 @@ private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: 
 @MainActor
 @Test func bangPrefixRunsCommandVerbatimWithoutClaude() async {
     let assistant = stubbedAssistant([:])
-    assistant.translate = { _, _, _, _ in
+    assistant.translate = { _, _, _, _, _ in
         Issue.record("Claude must not be called for !commands")
         return .failure(.cancelled)
     }
@@ -493,4 +493,70 @@ func liveClaudeTranslatesARequest() throws {
     print("live claude →", entry.command ?? "nil", "|", entry.risk.map(\.rawValue) ?? "-", "|", entry.text)
     #expect(entry.command?.isEmpty == false)
     #expect(entry.risk == .safe)
+}
+
+// MARK: - Proxy inheritance
+
+@Test func systemProxySettingsBecomeProxyVariables() {
+    // Shape of CFNetworkCopySystemProxySettings() with Clash-style settings.
+    let settings: [String: Any] = [
+        "HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 7890,
+        "HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 7890,
+        "SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7890,
+        "ExceptionsList": ["*.local", "192.168.0.0/16"],
+    ]
+    let config = ProxyConfiguration.fromSystemSettings(settings)
+    #expect(config?.https == "http://127.0.0.1:7890")
+    #expect(config?.http == "http://127.0.0.1:7890")
+    let env = config?.environment ?? [:]
+    #expect(env["https_proxy"] == "http://127.0.0.1:7890")
+    #expect(env["HTTPS_PROXY"] == "http://127.0.0.1:7890")
+    #expect(env["no_proxy"]?.contains(".local") == true)
+    #expect(env["no_proxy"]?.contains("localhost") == true)
+
+    let socksOnly: [String: Any] = ["SOCKSEnable": 1, "SOCKSProxy": "10.0.0.2", "SOCKSPort": 1080]
+    #expect(ProxyConfiguration.fromSystemSettings(socksOnly)?.all == "socks5://10.0.0.2:1080")
+    #expect(ProxyConfiguration.fromSystemSettings(["HTTPEnable": 0, "HTTPProxy": "x"]) == nil)
+}
+
+@Test func explicitProxyVariablesWinOverSystemProxy() {
+    let env = ["HTTPS_PROXY": "http://corp:3128", "PATH": "/bin"]
+    #expect(ProxyConfiguration.automatic(environment: env)?.https == "http://corp:3128")
+    #expect(ProxyConfiguration.fromEnvironment(["PATH": "/bin"]) == nil)
+    #expect(ProxyConfiguration.custom("127.0.0.1:7890")?.https == "http://127.0.0.1:7890")
+    #expect(ProxyConfiguration.custom("socks5://h:1")?.all == "socks5://h:1")
+    #expect(ProxyConfiguration.custom("  ") == nil)
+}
+
+@MainActor
+@Test func proxyPreferencesDriveClaudeAndPaneEnvironments() {
+    let defaults = UserDefaults(suiteName: "mterm-proxy-\(UUID().uuidString)")!
+    let prefs = TerminalPreferences(defaults: defaults)
+    #expect(prefs.proxyMode == .automatic)
+    #expect(!prefs.proxyInPanes, "panes keep their own proxy setup by default")
+    #expect(prefs.paneEnvironment.isEmpty)
+
+    prefs.proxyMode = .custom
+    prefs.customProxy = "http://127.0.0.1:7890"
+    #expect(prefs.claudeEnvironment["https_proxy"] == "http://127.0.0.1:7890")
+    prefs.proxyInPanes = true
+    #expect(prefs.paneEnvironment["http_proxy"] == "http://127.0.0.1:7890")
+
+    prefs.proxyMode = .off
+    #expect(prefs.claudeEnvironment["https_proxy"] == "", "None clears inherited proxy variables")
+    #expect(prefs.paneEnvironment.isEmpty)
+    #expect(TerminalPreferences(defaults: defaults).proxyMode == .off)
+}
+
+@MainActor
+@Test func claudeReceivesTheProxyEnvironment() async {
+    let assistant = CommandAssistant(defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
+    nonisolated(unsafe) var seen: [String: String] = [:]
+    assistant.translate = { _, _, _, environment, _ in
+        seen = environment
+        return .success(["command": "ls", "explanation": "", "risk": "safe"])
+    }
+    _ = await assistant.submit("list", context: sampleContext, model: "haiku",
+                               environment: ["https_proxy": "http://127.0.0.1:7890"])
+    #expect(seen["https_proxy"] == "http://127.0.0.1:7890")
 }

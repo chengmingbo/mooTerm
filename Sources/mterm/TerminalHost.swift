@@ -14,6 +14,8 @@ struct TerminalHost: NSViewRepresentable {
     let scheme: ColorScheme
     let fontSize: CGFloat
     let scrollback: Int
+    /// Extra variables for the shell, used only when it first starts.
+    let environment: [String: String]
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -48,7 +50,8 @@ struct TerminalHost: NSViewRepresentable {
 
     @discardableResult
     private func attachTerminal(to container: NSView) -> TerminalHostView {
-        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme, scrollback: scrollback)
+        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme, scrollback: scrollback,
+                                   environment: environment)
         if host.view.superview !== container {
             host.view.removeFromSuperview()
             host.view.frame = container.bounds

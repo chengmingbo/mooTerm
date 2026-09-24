@@ -100,14 +100,14 @@ final class TerminalHostView: NSObject {
     /// Start the login shell in the given directory — or, when `command` is
     /// set, run it through the shell. Passing the directory explicitly
     /// matters: `.app` bundles launched via `open` have `/` as their cwd.
-    func startShell(in directory: URL, command: String? = nil) {
+    func startShell(in directory: URL, command: String? = nil, environment extra: [String: String] = [:]) {
         let resolvedShell = Self.resolveLoginShell()
         var args = ["-l"]
         if let command, !command.isEmpty { args += ["-c", command] }
         view.startProcess(
             executable: resolvedShell,
             args: args,
-            environment: Self.shellEnvironment(shellPath: resolvedShell),
+            environment: Self.shellEnvironment(shellPath: resolvedShell, extra: extra),
             execName: "-" + URL(fileURLWithPath: resolvedShell).lastPathComponent,
             currentDirectory: directory.path
         )
@@ -199,8 +199,8 @@ final class TerminalHostView: NSObject {
         return FileManager.default.isExecutableFile(atPath: candidate) ? candidate : "/bin/zsh"
     }
 
-    nonisolated static func shellEnvironment(shellPath: String) -> [String] {
-        var env = ProcessInfo.processInfo.environment
+    nonisolated static func shellEnvironment(shellPath: String, extra: [String: String] = [:]) -> [String] {
+        var env = ProcessInfo.processInfo.environment.merging(extra) { _, new in new }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         // macOS's /etc/zshrc uses TERM_PROGRAM to decide whether to install its

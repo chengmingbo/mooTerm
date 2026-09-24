@@ -90,6 +90,13 @@ Details:
   into it. With broadcast on, the command goes to every pane in the group.
 - The model is set in Settings (default Haiku, fastest). Log in once with
   `claude auth login`.
+- Proxy: command-line tools ignore the macOS system proxy, and a Dock-launched
+  app has no `http_proxy` variables, so requests could fail with
+  "403 Request not allowed". Settings → Network → Proxy **Automatic** (default)
+  passes the system proxy (e.g. Clash's `127.0.0.1:7890`) to `claude` as
+  `http_proxy`/`https_proxy`/`all_proxy`; **Custom** takes a URL; **None**
+  removes them. "Also set in new terminal panes" exports the same variables in
+  new shells (off by default). A `claude` alias in your shell still applies.
 
 ## Build a .app
 
@@ -113,6 +120,7 @@ Sources/mterm/
 ├── TerminalHostView.swift   ONLY file that imports SwiftTerm
 ├── AssistantPanelView.swift Claude panel UI (left sidebar)
 ├── CommandAssistant.swift   Request → command proposals, risk checks, running
+├── ProxySettings.swift      System/env/custom proxy → http_proxy variables
 ├── ClaudeCLI.swift          Runs `claude -p` with structured output via the login shell
 ├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
 ├── CloseConfirmation.swift  "program still running" prompts

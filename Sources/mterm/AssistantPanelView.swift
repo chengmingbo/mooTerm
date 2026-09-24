@@ -167,7 +167,8 @@ struct AssistantPanelView: View {
         input = ""
         let context = TerminalContext.of(targetPane, broadcastPaneCount: broadcastCount)
         Task {
-            if let autoRun = await assistant.submit(text, context: context, model: preferences.claudeModel),
+            if let autoRun = await assistant.submit(text, context: context, model: preferences.claudeModel,
+                                                    environment: preferences.claudeEnvironment),
                let command = autoRun.command {
                 run(autoRun, command)
             }

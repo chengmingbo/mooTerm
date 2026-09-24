@@ -43,7 +43,8 @@ struct PaneView: View {
             isFocused: isActive,
             scheme: schemeStore.current,
             fontSize: effectiveSize,
-            scrollback: preferences.scrollbackLines
+            scrollback: preferences.scrollbackLines,
+            environment: pane.host == nil ? preferences.paneEnvironment : [:]
         )
     }
 

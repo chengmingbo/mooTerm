@@ -8,6 +8,18 @@ struct SettingsView: View {
     @EnvironmentObject var schemeStore: ColorSchemeStore
     @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = true
 
+    private var proxyDescription: String {
+        let using = preferences.effectiveProxy()?.summary
+        switch preferences.proxyMode {
+        case .automatic:
+            return "Uses the macOS system proxy (System Settings → Network → Proxies, e.g. from Clash), or proxy variables mTerm was launched with. Currently: \(using ?? "no proxy found")."
+        case .custom:
+            return "Sets http_proxy, https_proxy, and all_proxy to this URL. Currently: \(using ?? "not set")."
+        case .off:
+            return "No proxy variables are passed on; inherited ones are removed for the Claude panel."
+        }
+    }
+
     var body: some View {
         Form {
             Section {
@@ -43,6 +55,25 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("Claude Panel")
+            }
+
+            Section {
+                Picker("Proxy", selection: $preferences.proxyMode) {
+                    Text("Automatic").tag(TerminalPreferences.ProxyMode.automatic)
+                    Text("Custom").tag(TerminalPreferences.ProxyMode.custom)
+                    Text("None").tag(TerminalPreferences.ProxyMode.off)
+                }
+                if preferences.proxyMode == .custom {
+                    TextField("Proxy URL", text: $preferences.customProxy, prompt: Text("http://127.0.0.1:7890"))
+                }
+                Toggle("Also set in new terminal panes", isOn: $preferences.proxyInPanes)
+                    .disabled(preferences.proxyMode == .off)
+                Text(proxyDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Network")
             }
 
             Section {

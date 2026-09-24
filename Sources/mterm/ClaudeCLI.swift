@@ -46,6 +46,7 @@ final class ClaudeCLI: @unchecked Sendable {
              schema: String,
              model: String,
              workingDirectory: URL,
+             environment extra: [String: String] = [:],
              timeout: TimeInterval = 120) -> Result<[String: Any], Failure> {
         var arguments = [
             "--print",
@@ -68,6 +69,10 @@ final class ClaudeCLI: @unchecked Sendable {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         environment["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
         if let fallback = Self.executablePath() { environment["MTERM_CLAUDE_BIN"] = fallback }
+        // Proxy etc. An empty value removes the variable.
+        for (key, value) in extra {
+            environment[key] = value.isEmpty ? nil : value
+        }
         process.environment = environment
 
         let input = Pipe(), output = Pipe(), errors = Pipe()

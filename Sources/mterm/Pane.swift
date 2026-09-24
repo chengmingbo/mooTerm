@@ -40,7 +40,8 @@ final class Pane: ObservableObject, Identifiable {
     }
 
     /// The pane's terminal, created and started on first use.
-    func ensureHost(fontSize: CGFloat, scheme: ColorScheme, scrollback: Int) -> TerminalHostView {
+    func ensureHost(fontSize: CGFloat, scheme: ColorScheme, scrollback: Int,
+                    environment: [String: String] = [:]) -> TerminalHostView {
         if let host { return host }
         let dir = URL(fileURLWithPath: cwd ?? NSHomeDirectory())
         let host = TerminalHostView(startingDirectory: dir)
@@ -62,7 +63,7 @@ final class Pane: ObservableObject, Identifiable {
         }
         host.view.onBecomeFirstResponder = { [weak self] in self?.onFocus?() }
         host.view.onInput = { [weak self] data in self?.onInput?(data) }
-        host.startShell(in: dir, command: customCommand)
+        host.startShell(in: dir, command: customCommand, environment: environment)
         self.host = host
         return host
     }

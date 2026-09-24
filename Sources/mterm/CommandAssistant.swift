@@ -98,10 +98,11 @@ final class CommandAssistant: ObservableObject {
     private let defaults: UserDefaults
     private var cli: ClaudeCLI?
     /// Swappable for tests.
-    var translate: (_ prompt: String, _ model: String, _ cwd: URL, _ cli: ClaudeCLI) async -> Result<[String: Any], ClaudeCLI.Failure> = { prompt, model, cwd, cli in
+    var translate: (_ prompt: String, _ model: String, _ cwd: URL, _ environment: [String: String], _ cli: ClaudeCLI) async -> Result<[String: Any], ClaudeCLI.Failure> = { prompt, model, cwd, environment, cli in
         await Task.detached(priority: .userInitiated) {
             cli.run(prompt: prompt, systemPrompt: CommandAssistant.systemPrompt,
-                    schema: CommandAssistant.schema, model: model, workingDirectory: cwd)
+                    schema: CommandAssistant.schema, model: model, workingDirectory: cwd,
+                    environment: environment)
         }.value
     }
 
@@ -119,7 +120,8 @@ final class CommandAssistant: ObservableObject {
     /// Handle what the user typed. `!cmd` runs `cmd` verbatim (no Claude).
     /// Returns the proposal entry to auto-run, if any, so the caller can run
     /// it against the current pane.
-    func submit(_ raw: String, context: TerminalContext, model: String) async -> AssistantEntry? {
+    func submit(_ raw: String, context: TerminalContext, model: String,
+                environment: [String: String] = [:]) async -> AssistantEntry? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isThinking else { return nil }
 
@@ -141,7 +143,7 @@ final class CommandAssistant: ObservableObject {
         thinkingSince = Date()
         let cli = ClaudeCLI()
         self.cli = cli
-        let result = await translate(prompt, model, URL(fileURLWithPath: context.cwd), cli)
+        let result = await translate(prompt, model, URL(fileURLWithPath: context.cwd), environment, cli)
         self.cli = nil
         isThinking = false
         thinkingSince = nil
