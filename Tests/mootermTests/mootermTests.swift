@@ -1300,6 +1300,11 @@ private func openTestWindow(_ store: SessionStore, _ defaults: UserDefaults, sid
     #expect(view.copySelectionIfEnabled(pasteboard: pasteboard, enabled: true))
     let copied = pasteboard.string(forType: .string) ?? ""
     #expect(pane.copyToast?.characters == copied.count, "toast counts what was copied (\(copied.count))")
-    try await Task.sleep(nanoseconds: UInt64((Pane.copyToastDuration + 0.4) * 1_000_000_000))
+    // Other tests can hold the main actor for seconds when run in parallel.
+    // Count retries rather than watching the clock: each sleep re-queues
+    // this check behind the toast's own (already due) fade-out job.
+    for _ in 0..<60 where pane.copyToast != nil {
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
     #expect(pane.copyToast == nil, "toast fades away")
 }
