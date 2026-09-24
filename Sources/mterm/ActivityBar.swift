@@ -3,31 +3,31 @@ import SwiftUI
 /// A tool that lives in the left sidebar. Add a case (plus its panel in
 /// `SidebarPanel`) to put another button on the activity bar.
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case claude
+    case claude, codex, deepseek, minimax
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .claude: return "Claude"
-        }
-    }
+    /// The assistant behind this item (all current items are assistants).
+    var provider: AssistantProvider? { AssistantProvider(rawValue: rawValue) }
 
-    var systemImage: String {
-        switch self {
-        case .claude: return "sparkles"
-        }
-    }
+    var title: String { provider?.title ?? rawValue }
+    var systemImage: String { provider?.systemImage ?? "square" }
+    var tint: Color { provider?.tint ?? .accentColor }
 
+    /// ⌃⌘1…⌃⌘4 in activity-bar order; Claude also keeps ⇧⌘A.
+    var shortcutHint: String {
+        let number = (Self.allCases.firstIndex(of: self) ?? 0) + 1
+        return self == .claude ? "⇧⌘A or ⌃⌘\(number)" : "⌃⌘\(number)"
+    }
+}
+
+extension AssistantProvider {
     var tint: Color {
         switch self {
         case .claude: return .purple
-        }
-    }
-
-    var shortcutHint: String {
-        switch self {
-        case .claude: return "⇧⌘A"
+        case .codex: return .teal
+        case .deepseek: return .blue
+        case .minimax: return .pink
         }
     }
 }
@@ -115,10 +115,12 @@ private struct ActivityBarButton: View {
 /// The panel for the selected sidebar item.
 struct SidebarPanel: View {
     let item: SidebarItem
+    @EnvironmentObject var hub: AssistantHub
 
     var body: some View {
-        switch item {
-        case .claude: AssistantPanelView()
+        if let provider = item.provider {
+            AssistantPanelView(provider: provider, assistant: hub[provider])
+                .id(provider)
         }
     }
 }

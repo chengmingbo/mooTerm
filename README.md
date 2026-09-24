@@ -38,7 +38,9 @@ at build time.
 | Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
 | Save layout | ⇧⌘S |
 | Settings (scrollback lines, font, theme, dimming, Claude model) | ⌘, |
-| Claude panel: open / focus / close | ⇧⌘A |
+| Claude / Codex / DeepSeek / MiniMax panel | ⌃⌘1 / ⌃⌘2 / ⌃⌘3 / ⌃⌘4 (Claude also ⇧⌘A) |
+| Fill the tab with a pane / restore | double-click the pane header (or ⇧⌘X) |
+| Zoom the window | double-click empty tab-bar space |
 
 Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 
@@ -63,12 +65,25 @@ from 0 (off) to 1,000,000; open panes resize their history immediately.
 Shells belong to their panes, so splitting, zooming, and switching tabs never
 restart them. When a shell exits, its pane closes.
 
-## Claude panel
+## Assistant panels (Claude, Codex, DeepSeek, MiniMax)
 
-The thin activity bar on the far left holds tool buttons (Claude first, and
-Settings at the bottom). Click a button to open its panel; click it again to
-close it. The Claude panel (⇧⌘A) turns plain language into shell commands for
-the active pane:
+The thin activity bar on the far left holds a button per assistant, with
+Settings at the bottom. Click a button to open its panel; click it again to
+close it. Each panel turns plain language into shell commands for the active
+pane, and keeps its own conversation:
+
+| Panel | How it talks to the model | Setup |
+|---|---|---|
+| Claude | Claude Code CLI (`claude -p`, tools disabled) | `claude auth login` |
+| Codex | Codex CLI (`codex exec`, read-only sandbox) — slower: it may look around first | `codex login` |
+| DeepSeek | DeepSeek API directly (fast) | `DEEPSEEK_API_KEY` in your shell profile, or paste a key in Settings |
+| MiniMax | MiniMax API directly (China or Global endpoint) | A MiniMax platform API key in Settings, or `MINIMAX_API_KEY` |
+
+CLIs run through your login shell by name, so your aliases apply. Models,
+endpoints, and keys are in Settings → Assistants. Keys pasted there are saved
+to `~/Library/Application Support/mTerm/credentials.json` (mode 600).
+
+Using a panel:
 
 1. Type what you want — "10 largest files under here", "which process is on
    port 3000", "why did the last command fail?" — and press Return.
@@ -90,14 +105,13 @@ Details:
 - `!command` runs a command exactly as typed, without asking Claude.
 - If a program like `vim` is in the foreground, Run refuses instead of typing
   into it. With broadcast on, the command goes to every pane in the group.
-- The model is set in Settings (default Haiku, fastest). Log in once with
-  `claude auth login`.
+- Models are set per assistant in Settings (Claude defaults to Haiku).
 - Proxy: command-line tools ignore the macOS system proxy, and a Dock-launched
   app has no `http_proxy` variables, so requests could fail with
   "403 Request not allowed". Settings → Network → Proxy **Automatic** (default)
-  passes the system proxy (e.g. Clash's `127.0.0.1:7890`) to `claude` as
-  `http_proxy`/`https_proxy`/`all_proxy`; **Custom** takes a URL; **None**
-  removes them. "Also set in new terminal panes" exports the same variables in
+  passes the system proxy (e.g. Clash's `127.0.0.1:7890`) to `claude` and
+  `codex` as `http_proxy`/`https_proxy`/`all_proxy` (the DeepSeek/MiniMax API
+  calls follow it too); **Custom** takes a URL; **None** removes them. "Also set in new terminal panes" exports the same variables in
   new shells (off by default). A `claude` alias in your shell still applies.
 
 ## Build a .app
@@ -124,7 +138,8 @@ Sources/mterm/
 ├── AssistantPanelView.swift Claude panel UI (left sidebar)
 ├── CommandAssistant.swift   Request → command proposals, risk checks, running
 ├── ProxySettings.swift      System/env/custom proxy → http_proxy variables
-├── ClaudeCLI.swift          Runs `claude -p` with structured output via the login shell
+├── AssistantProvider.swift  Claude/Codex/DeepSeek/MiniMax metadata; API key store
+├── AssistantBackends.swift  CLI runner (login shell), Claude, Codex, chat-completions API
 ├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
 ├── CloseConfirmation.swift  "program still running" prompts
 ├── SettingsView.swift       Settings window (⌘,)

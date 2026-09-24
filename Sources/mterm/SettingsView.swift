@@ -45,17 +45,7 @@ struct SettingsView: View {
                 Text("Scrollback")
             }
 
-            Section {
-                Picker("Model", selection: $preferences.claudeModel) {
-                    ForEach(TerminalPreferences.claudeModelChoices, id: \.id) { Text($0.label).tag($0.id) }
-                }
-                Text("Used by the Claude panel (⇧⌘A) through your installed Claude Code CLI. Claude only proposes commands; nothing runs until you press Run, unless you turn on auto-run for read-only commands.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } header: {
-                Text("Claude Panel")
-            }
+            AssistantSettingsSection()
 
             Section {
                 Picker("Proxy", selection: $preferences.proxyMode) {
@@ -99,7 +89,110 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
-        .fixedSize()
+        .frame(width: 500, height: 680)
+    }
+}
+
+
+/// Model, endpoint, and API key for each assistant panel.
+private struct AssistantSettingsSection: View {
+    @EnvironmentObject var preferences: TerminalPreferences
+    @State private var provider: AssistantProvider = UserDefaults.selectedSidebarItem?.provider ?? .claude
+    @State private var keyDraft = ""
+    @State private var keyStatus = ""
+
+    var body: some View {
+        Section {
+            Picker("Assistant", selection: $provider) {
+                ForEach(AssistantProvider.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Text(provider.backendDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LabeledContent("Model") {
+                HStack(spacing: 6) {
+                    TextField("Model", text: Binding(
+                        get: { preferences.model(for: provider) },
+                        set: { preferences.setModel($0, for: provider) }),
+                        prompt: Text(provider == .codex ? "Codex default (config.toml)" : "Tool default"))
+                        .labelsHidden()
+                    if !provider.modelSuggestions.isEmpty {
+                        Menu("") {
+                            ForEach(provider.modelSuggestions, id: \.self) { model in
+                                Button(model) { preferences.setModel(model, for: provider) }
+                            }
+                        }
+                        .menuIndicator(.visible)
+                        .fixedSize()
+                    }
+                }
+            }
+
+            if provider.baseURLChoices.count > 1 {
+                Picker("Endpoint", selection: Binding(
+                    get: { preferences.baseURL(for: provider) ?? "" },
+                    set: { preferences.setBaseURL($0, for: provider) })) {
+                    ForEach(provider.baseURLChoices, id: \.url) { Text($0.label).tag($0.url) }
+                }
+            }
+
+            if let variable = provider.apiKeyVariable {
+                LabeledContent("API key") {
+                    HStack(spacing: 6) {
+                        SecureField("API key", text: $keyDraft, prompt: Text("Paste to save"))
+                            .labelsHidden()
+                            .onSubmit(saveKey)
+                        Button("Save", action: saveKey)
+                            .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if APIKeyStore.savedKey(for: provider) != nil {
+                            Button("Remove") {
+                                APIKeyStore.save(nil, for: provider)
+                                refreshKeyStatus()
+                            }
+                        }
+                    }
+                }
+                Text(keyStatus.isEmpty ? "Checking for a key…" : keyStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("Without a saved key, mTerm uses $\(variable) from your shell profile.")
+            }
+        } header: {
+            Text("Assistants")
+        }
+        .onAppear(perform: refreshKeyStatus)
+        .onChange(of: provider) { _ in
+            keyDraft = ""
+            refreshKeyStatus()
+        }
+    }
+
+    private func saveKey() {
+        APIKeyStore.save(keyDraft, for: provider)
+        keyDraft = ""
+        refreshKeyStatus()
+    }
+
+    private func refreshKeyStatus() {
+        guard let variable = provider.apiKeyVariable else { keyStatus = ""; return }
+        let current = provider
+        if let source = APIKeyStore.source(for: current) {
+            keyStatus = "Using the key \(source)."
+            return
+        }
+        keyStatus = ""
+        Task {
+            let found = await Task.detached { APIKeyStore.resolve(for: current) != nil }.value
+            guard current == provider else { return }
+            keyStatus = found
+                ? "Using $\(variable) from your shell profile."
+                : "No key yet. Paste one above, or export \(variable) in ~/.zshrc."
+        }
     }
 }

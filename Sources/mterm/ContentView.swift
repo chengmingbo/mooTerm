@@ -52,7 +52,12 @@ struct ContentView: View {
             ForEach(store.tabs) { tab in
                 tabButton(tab)
             }
-            Spacer(minLength: 4)
+            // Empty tab-bar space acts like a title bar: double-click zooms
+            // the window (or whatever System Settings says it should do).
+            Color.clear
+                .frame(minWidth: 4, maxWidth: .infinity, minHeight: 20)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { WindowDoubleClick.perform(on: NSApp.keyWindow) }
             Button { store.newTab() } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold))
             }

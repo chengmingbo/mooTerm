@@ -385,30 +385,31 @@ private func feedLines(_ host: TerminalHostView, _ count: Int) {
     #expect(prompt.contains("<request>\nonly .swift\n</request>"))
 }
 
+private func cliOutput(_ stdout: Data, status: Int32 = 0) -> LoginShellProcess.Output {
+    LoginShellProcess.Output(status: status, stdout: stdout, stderr: Data())
+}
+
 @Test func claudeCLIParsesStructuredOutputAndErrors() throws {
     let structured = try JSONSerialization.data(withJSONObject: [
         "is_error": false, "result": "", "structured_output": ["command": "ls", "explanation": "list", "risk": "safe"],
     ])
     // Interactive shells may print a banner before the CLI's JSON line.
     let withBanner = Data("Welcome to zsh\n".utf8) + structured
-    guard case .success(let object) = ClaudeCLI.parse(output: withBanner, errorOutput: Data(), status: 0) else {
-        Issue.record("expected success"); return
-    }
-    #expect(object["command"] as? String == "ls")
+    #expect(try ClaudeCLI.parse(cliOutput(withBanner)).get().command == "ls")
 
     let legacy = try JSONSerialization.data(withJSONObject: [
         "is_error": false, "result": #"{"command":"pwd","explanation":"here","risk":"safe"}"#,
     ])
-    guard case .success(let legacyObject) = ClaudeCLI.parse(output: legacy, errorOutput: Data(), status: 0) else {
-        Issue.record("expected success from result text"); return
-    }
-    #expect(legacyObject["command"] as? String == "pwd")
+    #expect(try ClaudeCLI.parse(cliOutput(legacy)).get().command == "pwd")
 
     let notLoggedIn = try JSONSerialization.data(withJSONObject: ["is_error": true, "result": "Not logged in · Please run /login"])
-    guard case .failure(let failure) = ClaudeCLI.parse(output: notLoggedIn, errorOutput: Data(), status: 1) else {
+    guard case .failure(let failure) = ClaudeCLI.parse(cliOutput(notLoggedIn, status: 1)) else {
         Issue.record("expected failure"); return
     }
     #expect(failure.message.contains("claude auth login"))
+    guard case .failure(.notInstalled) = ClaudeCLI.parse(cliOutput(Data(), status: 127)) else {
+        Issue.record("exit 127 means the tool wasn't found"); return
+    }
 }
 
 @Test func commandInputClearsLineAndUsesBracketedPaste() {
@@ -416,13 +417,28 @@ private func feedLines(_ host: TerminalHostView, _ count: Int) {
     #expect(TerminalHostView.commandInput("ls", execute: false, bracketedPaste: true) == "\u{15}\u{1b}[200~ls\u{1b}[201~")
 }
 
+/// Backend double: returns a canned reply and records the request.
+private final class StubTranslator: CommandTranslator, @unchecked Sendable {
+    let result: Result<CommandReply, AssistantFailure>
+    var onRequest: ((TranslationRequest) -> Void)?
+    init(_ result: Result<CommandReply, AssistantFailure>) { self.result = result }
+    func translate(_ request: TranslationRequest) async -> Result<CommandReply, AssistantFailure> {
+        onRequest?(request)
+        return result
+    }
+    func cancel() {}
+}
+
 @MainActor
-private func stubbedAssistant(_ reply: [String: Any]) -> CommandAssistant {
-    let assistant = CommandAssistant(defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
-    nonisolated(unsafe) let reply = reply
-    assistant.translate = { _, _, _, _, _ in .success(reply) }
+private func stubbedAssistant(_ reply: [String: Any], provider: AssistantProvider = .claude) -> CommandAssistant {
+    let assistant = CommandAssistant(provider: provider,
+                                     defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
+    let parsed = CommandReply(json: reply) ?? CommandReply(command: nil, explanation: "", risk: "safe")
+    assistant.makeTranslator = { StubTranslator(.success(parsed)) }
     return assistant
 }
+
+private let haiku = AssistantOptions(model: "haiku")
 
 private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: "zsh", foregroundProgram: nil,
                                             recentOutput: "", broadcastPaneCount: 1)
@@ -430,28 +446,28 @@ private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: 
 @MainActor
 @Test func assistantAutoRunsOnlySafeCommandsWhenEnabled() async {
     let safe = stubbedAssistant(["command": "ls -la", "explanation": "list", "risk": "safe"])
-    #expect(await safe.submit("list files", context: sampleContext, model: "haiku") == nil, "auto-run is off by default")
+    #expect(await safe.submit("list files", context: sampleContext, options: haiku) == nil, "auto-run is off by default")
     #expect(safe.entries.map(\.role) == [.user, .assistant])
 
     safe.autoRunSafe = true
-    let auto = await safe.submit("list again", context: sampleContext, model: "haiku")
+    let auto = await safe.submit("list again", context: sampleContext, options: haiku)
     #expect(auto?.command == "ls -la")
 
     let risky = stubbedAssistant(["command": "rm -rf tmp", "explanation": "delete", "risk": "danger"])
     risky.autoRunSafe = true
-    #expect(await risky.submit("delete tmp", context: sampleContext, model: "haiku") == nil, "never auto-run danger")
+    #expect(await risky.submit("delete tmp", context: sampleContext, options: haiku) == nil, "never auto-run danger")
 }
 
 @MainActor
 @Test func bangPrefixRunsCommandVerbatimWithoutClaude() async {
     let assistant = stubbedAssistant([:])
-    assistant.translate = { _, _, _, _, _ in
-        Issue.record("Claude must not be called for !commands")
-        return .failure(.cancelled)
+    assistant.makeTranslator = {
+        Issue.record("the model must not be called for !commands")
+        return StubTranslator(.failure(.cancelled))
     }
-    let entry = await assistant.submit("!git status -sb", context: sampleContext, model: "")
+    let entry = await assistant.submit("!git status -sb", context: sampleContext, options: haiku)
     #expect(entry?.command == "git status -sb")
-    #expect(await assistant.submit("!rm -rf /tmp/x", context: sampleContext, model: "") == nil,
+    #expect(await assistant.submit("!rm -rf /tmp/x", context: sampleContext, options: haiku) == nil,
             "dangerous literal commands still wait for confirmation")
     #expect(assistant.run(UUID(), command: "ls", in: nil) == .noPane)
 }
@@ -464,35 +480,62 @@ private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: 
     #expect(tail == "row 28\nrow 29\nrow 30")
 }
 
-@Test func claudeRunsByNameSoShellAliasesApply() {
+@Test func cliToolsRunByNameSoShellAliasesApply() {
     // Regression: exec'ing the binary by path skipped `alias claude='https_proxy=… claude'`
     // and the API answered "403 Request not allowed".
-    let launch = ClaudeCLI.loginShellLaunch(arguments: ["--print"])
+    let launch = LoginShellProcess.launch(tool: "claude", arguments: ["--print"])
     #expect(launch.arguments.prefix(3) == ["-l", "-i", "-c"])
     #expect(launch.arguments[3].contains(#"then claude "$@""#))
     #expect(launch.arguments.suffix(2) == ["mterm-claude", "--print"])
-    #expect(ClaudeCLI.Failure.failed("Failed to authenticate. API Error: 403 Request not allowed").message.contains("proxy"))
+    #expect(LoginShellProcess.launch(tool: "codex", arguments: []).arguments[3].contains(#"then codex "$@""#))
+    #expect(AssistantFailure.failed("Failed to authenticate. API Error: 403 Request not allowed").message.contains("proxy"))
 }
 
-/// Opt-in end-to-end check against the installed Claude Code CLI. Strip the
-/// proxy variables to mimic a Dock-launched app:
-/// `env -u http_proxy -u https_proxy MTERM_LIVE_CLAUDE=1 swift test --filter liveClaude`
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MTERM_LIVE_CLAUDE"] == "1"))
-func liveClaudeTranslatesARequest() throws {
+private func liveRequest(model: String, apiKey: String? = nil, baseURL: String? = nil) -> TranslationRequest {
     let context = TerminalContext(cwd: NSTemporaryDirectory(), shell: "zsh", foregroundProgram: nil,
                                   recentOutput: "", broadcastPaneCount: 1)
-    let prompt = CommandAssistant.prompt(request: "count files in this directory, including hidden ones",
-                                         context: context, history: "")
-    let result = ClaudeCLI().run(prompt: prompt, systemPrompt: CommandAssistant.systemPrompt,
-                                 schema: CommandAssistant.schema, model: "haiku",
-                                 workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
-    guard case .success(let object) = result else {
-        Issue.record("CLI failed: \(result)"); return
+    return TranslationRequest(
+        prompt: CommandAssistant.prompt(request: "count files in this directory, including hidden ones",
+                                        context: context, history: ""),
+        systemPrompt: CommandAssistant.systemPrompt, schema: CommandAssistant.schema, model: model,
+        workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
+        environment: ProxyConfiguration.automatic()?.environment ?? [:],
+        apiProxy: .system, apiKey: apiKey, baseURL: baseURL)
+}
+
+private func expectLiveReply(_ name: String, _ result: Result<CommandReply, AssistantFailure>) {
+    guard case .success(let reply) = result else {
+        Issue.record("\(name) failed: \(result)"); return
     }
-    let entry = CommandAssistant.entry(from: object)
-    print("live claude →", entry.command ?? "nil", "|", entry.risk.map(\.rawValue) ?? "-", "|", entry.text)
+    let entry = CommandAssistant.entry(from: reply)
+    print("live \(name) →", entry.command ?? "nil", "|", entry.risk.map(\.rawValue) ?? "-", "|", entry.text)
     #expect(entry.command?.isEmpty == false)
-    #expect(entry.risk == .safe)
+}
+
+/// Opt-in end-to-end checks against the real services. Strip proxy
+/// variables to mimic a Dock-launched app, e.g.
+/// `env -u http_proxy -u https_proxy MTERM_LIVE=claude,deepseek swift test --filter live`
+private func liveEnabled(_ name: String) -> Bool {
+    (ProcessInfo.processInfo.environment["MTERM_LIVE"] ?? "").split(separator: ",").contains { $0 == name }
+}
+
+@Test(.enabled(if: liveEnabled("claude")))
+func liveClaudeTranslatesARequest() async {
+    expectLiveReply("claude", await ClaudeCLI().translate(liveRequest(model: "haiku")))
+}
+
+@Test(.enabled(if: liveEnabled("codex")))
+func liveCodexTranslatesARequest() async {
+    expectLiveReply("codex", await CodexCLI().translate(liveRequest(model: "")))
+}
+
+@Test(.enabled(if: liveEnabled("deepseek")))
+func liveDeepSeekTranslatesARequest() async {
+    let client = AssistantProvider.deepseek.makeTranslator()
+    let key = APIKeyStore.resolve(for: .deepseek)
+    expectLiveReply("deepseek", await client.translate(liveRequest(
+        model: AssistantProvider.deepseek.defaultModel, apiKey: key,
+        baseURL: AssistantProvider.deepseek.baseURLChoices.first?.url)))
 }
 
 // MARK: - Proxy inheritance
@@ -538,27 +581,35 @@ func liveClaudeTranslatesARequest() throws {
 
     prefs.proxyMode = .custom
     prefs.customProxy = "http://127.0.0.1:7890"
-    #expect(prefs.claudeEnvironment["https_proxy"] == "http://127.0.0.1:7890")
+    #expect(prefs.cliEnvironment["https_proxy"] == "http://127.0.0.1:7890")
     prefs.proxyInPanes = true
     #expect(prefs.paneEnvironment["http_proxy"] == "http://127.0.0.1:7890")
 
     prefs.proxyMode = .off
-    #expect(prefs.claudeEnvironment["https_proxy"] == "", "None clears inherited proxy variables")
+    #expect(prefs.cliEnvironment["https_proxy"] == "", "None clears inherited proxy variables")
     #expect(prefs.paneEnvironment.isEmpty)
     #expect(TerminalPreferences(defaults: defaults).proxyMode == .off)
 }
 
 @MainActor
-@Test func claudeReceivesTheProxyEnvironment() async {
-    let assistant = CommandAssistant(defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
-    nonisolated(unsafe) var seen: [String: String] = [:]
-    assistant.translate = { _, _, _, environment, _ in
-        seen = environment
-        return .success(["command": "ls", "explanation": "", "risk": "safe"])
+@Test func assistantPassesOptionsToTheBackend() async {
+    let assistant = CommandAssistant(provider: .deepseek,
+                                     defaults: UserDefaults(suiteName: "mterm-assistant-\(UUID().uuidString)")!)
+    nonisolated(unsafe) var seen: TranslationRequest?
+    assistant.makeTranslator = {
+        let stub = StubTranslator(.success(CommandReply(command: "ls", explanation: "", risk: "safe")))
+        stub.onRequest = { seen = $0 }
+        return stub
     }
-    _ = await assistant.submit("list", context: sampleContext, model: "haiku",
-                               environment: ["https_proxy": "http://127.0.0.1:7890"])
-    #expect(seen["https_proxy"] == "http://127.0.0.1:7890")
+    var options = AssistantOptions(model: "deepseek-chat")
+    options.environment = ["https_proxy": "http://127.0.0.1:7890"]
+    options.baseURL = "https://api.deepseek.com"
+    options.apiKey = { "sk-test" }
+    _ = await assistant.submit("list", context: sampleContext, options: options)
+    #expect(seen?.environment["https_proxy"] == "http://127.0.0.1:7890")
+    #expect(seen?.model == "deepseek-chat")
+    #expect(seen?.apiKey == "sk-test")
+    #expect(seen?.baseURL == "https://api.deepseek.com")
 }
 
 // MARK: - Activity bar
@@ -568,4 +619,140 @@ func liveClaudeTranslatesARequest() throws {
     let ids = SidebarItem.allCases.map(\.id)
     #expect(Set(ids).count == ids.count)
     #expect(SidebarItem(rawValue: "") == nil, "empty selection means the sidebar is closed")
+}
+
+// MARK: - Codex, DeepSeek, MiniMax
+
+@Test func commandReplyParsesFencedOrReasoningWrappedJSON() {
+    let fenced = CommandReply(text: "```json\n{\"command\":\"ls\",\"explanation\":\"x\",\"risk\":\"safe\"}\n```")
+    #expect(fenced?.command == "ls")
+    let thinking = CommandReply(text: "<think>maybe {not json}</think>\n{\"command\":null,\"explanation\":\"answer\",\"risk\":\"safe\"}")
+    #expect(thinking?.command == nil && thinking?.explanation == "answer")
+    #expect(CommandReply(text: "no json here") == nil)
+}
+
+@Test func chatCompletionsParsesRepliesAndErrors() throws {
+    let ok = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": #"{"command":"pwd","explanation":"","risk":"safe"}"#]]]])
+    let okResponse = HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 200, httpVersion: nil, headerFields: nil)
+    #expect(try ChatCompletionsClient.parse(data: ok, response: okResponse, error: nil, provider: "DeepSeek").get().command == "pwd")
+
+    let unauthorized = try JSONSerialization.data(withJSONObject: ["error": ["message": "Authentication Fails"]])
+    let r401 = HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 401, httpVersion: nil, headerFields: nil)
+    guard case .failure(let failure) = ChatCompletionsClient.parse(data: unauthorized, response: r401, error: nil, provider: "DeepSeek") else {
+        Issue.record("expected 401 failure"); return
+    }
+    #expect(failure.message.contains("401") && failure.message.contains("Authentication Fails"))
+
+    // MiniMax reports some errors as HTTP 200 with base_resp.
+    let minimax = try JSONSerialization.data(withJSONObject: ["base_resp": ["status_code": 1004, "status_msg": "login fail"]])
+    guard case .failure(let mm) = ChatCompletionsClient.parse(data: minimax, response: okResponse, error: nil, provider: "MiniMax") else {
+        Issue.record("expected MiniMax failure"); return
+    }
+    #expect(mm.message.contains("1004"))
+}
+
+@Test func chatCompletionsRequestBodyAsksForJSON() {
+    let request = TranslationRequest(prompt: "p", systemPrompt: "s", schema: "{}", model: "deepseek-chat",
+                                     workingDirectory: URL(fileURLWithPath: "/"), environment: [:],
+                                     apiProxy: .system, apiKey: "k", baseURL: nil)
+    let body = ChatCompletionsClient.body(for: request, jsonMode: true)
+    #expect(body["model"] as? String == "deepseek-chat")
+    #expect((body["response_format"] as? [String: String])?["type"] == "json_object")
+    #expect(ChatCompletionsClient.body(for: request, jsonMode: false)["response_format"] == nil)
+}
+
+@MainActor
+@Test func apiProvidersWithoutAKeyExplainWhereToPutIt() async {
+    let result = await ChatCompletionsClient(providerName: "MiniMax", keyVariable: "MINIMAX_API_KEY")
+        .translate(TranslationRequest(prompt: "", systemPrompt: "", schema: "", model: "m",
+                                      workingDirectory: URL(fileURLWithPath: "/"), environment: [:],
+                                      apiProxy: .system, apiKey: nil, baseURL: "https://api.minimaxi.com/v1"))
+    guard case .failure(let failure) = result else { Issue.record("expected missing key"); return }
+    #expect(failure == .missingAPIKey(provider: "MiniMax", variable: "MINIMAX_API_KEY"))
+    #expect(failure.message.contains("MINIMAX_API_KEY"))
+}
+
+@Test func codexRunsReadOnlyEphemeralWithSchema() {
+    let request = TranslationRequest(prompt: "", systemPrompt: "", schema: "{}", model: "",
+                                     workingDirectory: URL(fileURLWithPath: "/tmp/proj"), environment: [:],
+                                     apiProxy: .system, apiKey: nil, baseURL: nil)
+    let args = CodexCLI.arguments(for: request, schemaFile: URL(fileURLWithPath: "/s.json"),
+                                  outputFile: URL(fileURLWithPath: "/o.txt"))
+    #expect(args.first == "exec")
+    #expect(args.contains("--ephemeral"))
+    #expect(args.firstIndex(of: "--sandbox").map { args[$0 + 1] } == "read-only")
+    #expect(args.firstIndex(of: "--output-schema").map { args[$0 + 1] } == "/s.json")
+    #expect(args.firstIndex(of: "--cd").map { args[$0 + 1] } == "/tmp/proj")
+    #expect(!args.contains("--model"), "empty model keeps Codex's configured default")
+    #expect(args.last == "-")
+}
+
+@Test func apiKeysAreStoredPrivately() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("mterm-keys-\(UUID().uuidString)/credentials.json")
+    defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+    APIKeyStore.save("  sk-abc  ", for: .deepseek, file: file)
+    #expect(APIKeyStore.savedKey(for: .deepseek, file: file) == "sk-abc")
+    #expect(APIKeyStore.savedKey(for: .minimax, file: file) == nil)
+    let permissions = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+    #expect(permissions == 0o600)
+    APIKeyStore.save("", for: .deepseek, file: file)
+    #expect(APIKeyStore.savedKey(for: .deepseek, file: file) == nil)
+}
+
+@Test func loginShellVariableIgnoresBanners() {
+    #expect(APIKeyStore.parseMarkedValue("HTTP proxy set\n\nMTERM_ENV_VALUE=sk-123\n") == "sk-123")
+    #expect(APIKeyStore.parseMarkedValue("Welcome!\n\nMTERM_ENV_VALUE=\n") == nil, "unset variable, not the banner")
+}
+
+@MainActor
+@Test func providerPreferencesHaveDefaultsAndMigrateClaudeModel() {
+    let defaults = UserDefaults(suiteName: "mterm-provider-\(UUID().uuidString)")!
+    defaults.set("sonnet", forKey: TerminalPreferences.claudeModelKey)
+    let prefs = TerminalPreferences(defaults: defaults)
+    #expect(prefs.model(for: .claude) == "sonnet", "old single Claude model setting carries over")
+    #expect(prefs.model(for: .deepseek) == "deepseek-chat")
+    #expect(prefs.model(for: .codex) == "")
+    #expect(prefs.baseURL(for: .minimax) == "https://api.minimaxi.com/v1")
+    prefs.setModel("MiniMax-M3", for: .minimax)
+    prefs.setBaseURL("https://api.minimax.io/v1", for: .minimax)
+    let reloaded = TerminalPreferences(defaults: defaults)
+    #expect(reloaded.model(for: .minimax) == "MiniMax-M3")
+    #expect(reloaded.baseURL(for: .minimax) == "https://api.minimax.io/v1")
+}
+
+@MainActor
+@Test func eachProviderKeepsItsOwnConversation() async {
+    let defaults = UserDefaults(suiteName: "mterm-hub-\(UUID().uuidString)")!
+    let hub = AssistantHub(defaults: defaults)
+    #expect(Set(hub.assistants.keys) == Set(AssistantProvider.allCases))
+    _ = await hub[.codex].submit("!ls", context: sampleContext, options: haiku)
+    #expect(hub[.codex].entries.count == 2)
+    #expect(hub[.claude].entries.isEmpty)
+    #expect(AssistantHub(defaults: defaults)[.codex].entries.count == 2, "persisted per provider")
+}
+
+@Test func activityBarHasAllAssistants() {
+    #expect(SidebarItem.allCases.map(\.rawValue) == ["claude", "codex", "deepseek", "minimax"])
+    #expect(SidebarItem.allCases.allSatisfy { $0.provider != nil })
+}
+
+// MARK: - Double-click
+
+@Test func windowDoubleClickFollowsSystemSetting() {
+    #expect(WindowDoubleClick.action(for: nil) == .zoom)
+    #expect(WindowDoubleClick.action(for: "Maximize") == .zoom)
+    #expect(WindowDoubleClick.action(for: "Minimize") == .minimize)
+    #expect(WindowDoubleClick.action(for: "None") == .none)
+}
+
+@MainActor
+@Test func doubleClickingAPaneHeaderTogglesMaximise() {
+    let tab = TabSession()
+    let a = tab.panes[0]
+    tab.split(.vertical)
+    tab.toggleMaximise(paneID: a.id)
+    #expect(tab.zoomedPaneID == a.id && tab.activePaneID == a.id)
+    #expect(!tab.zoomBumpsFont, "maximise keeps the font size")
+    tab.toggleMaximise(paneID: a.id)
+    #expect(tab.zoomedPaneID == nil)
 }

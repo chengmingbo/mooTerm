@@ -79,37 +79,53 @@ struct TerminalContext: Sendable, Equatable {
     }
 }
 
-/// The Claude panel's brain: turns requests into shell command proposals
-/// and runs accepted ones in a pane. Knows nothing about SwiftUI.
+/// Per-request settings the panel supplies from Settings.
+struct AssistantOptions: Sendable {
+    var model: String
+    /// Extra variables for CLI backends (proxy).
+    var environment: [String: String] = [:]
+    var apiProxy: APIProxy = .system
+    var baseURL: String?
+    /// Resolves the API key off the main thread (may consult the login shell).
+    var apiKey: (@Sendable () -> String?)? = nil
+}
+
+/// One assistant panel's brain (one per provider): turns requests into
+/// shell command proposals and runs accepted ones in a pane. Knows nothing
+/// about SwiftUI.
 @MainActor
 final class CommandAssistant: ObservableObject {
-    static let autoRunKey = "mTerm.assistant.autoRunSafe"
-    static let entriesKey = "mTerm.assistant.entries"
     static let maxStoredEntries = 60
+
+    let provider: AssistantProvider
+    /// Claude keeps the keys it had before other providers existed.
+    private var autoRunKey: String {
+        provider == .claude ? "mTerm.assistant.autoRunSafe" : "mTerm.assistant.\(provider.rawValue).autoRunSafe"
+    }
+    private var entriesKey: String {
+        provider == .claude ? "mTerm.assistant.entries" : "mTerm.assistant.\(provider.rawValue).entries"
+    }
 
     @Published private(set) var entries: [AssistantEntry] = []
     @Published private(set) var isThinking = false
     @Published private(set) var thinkingSince: Date?
     /// Run `.safe` proposals immediately, like typing them yourself.
     @Published var autoRunSafe: Bool {
-        didSet { defaults.set(autoRunSafe, forKey: Self.autoRunKey) }
+        didSet { defaults.set(autoRunSafe, forKey: autoRunKey) }
     }
 
     private let defaults: UserDefaults
-    private var cli: ClaudeCLI?
-    /// Swappable for tests.
-    var translate: (_ prompt: String, _ model: String, _ cwd: URL, _ environment: [String: String], _ cli: ClaudeCLI) async -> Result<[String: Any], ClaudeCLI.Failure> = { prompt, model, cwd, environment, cli in
-        await Task.detached(priority: .userInitiated) {
-            cli.run(prompt: prompt, systemPrompt: CommandAssistant.systemPrompt,
-                    schema: CommandAssistant.schema, model: model, workingDirectory: cwd,
-                    environment: environment)
-        }.value
-    }
+    private var inFlight: CommandTranslator?
+    /// Creates the backend for each request. Swappable for tests.
+    var makeTranslator: () -> CommandTranslator
 
-    init(defaults: UserDefaults = .standard) {
+    init(provider: AssistantProvider = .claude, defaults: UserDefaults = .standard) {
+        self.provider = provider
         self.defaults = defaults
-        self.autoRunSafe = defaults.bool(forKey: Self.autoRunKey)
-        if let data = defaults.data(forKey: Self.entriesKey),
+        self.makeTranslator = { provider.makeTranslator() }
+        self.autoRunSafe = false
+        self.autoRunSafe = defaults.bool(forKey: autoRunKey)
+        if let data = defaults.data(forKey: entriesKey),
            let saved = try? JSONDecoder().decode([AssistantEntry].self, from: data) {
             entries = saved
         }
@@ -120,8 +136,7 @@ final class CommandAssistant: ObservableObject {
     /// Handle what the user typed. `!cmd` runs `cmd` verbatim (no Claude).
     /// Returns the proposal entry to auto-run, if any, so the caller can run
     /// it against the current pane.
-    func submit(_ raw: String, context: TerminalContext, model: String,
-                environment: [String: String] = [:]) async -> AssistantEntry? {
+    func submit(_ raw: String, context: TerminalContext, options: AssistantOptions) async -> AssistantEntry? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isThinking else { return nil }
 
@@ -141,16 +156,27 @@ final class CommandAssistant: ObservableObject {
 
         isThinking = true
         thinkingSince = Date()
-        let cli = ClaudeCLI()
-        self.cli = cli
-        let result = await translate(prompt, model, URL(fileURLWithPath: context.cwd), environment, cli)
-        self.cli = nil
+        let translator = makeTranslator()
+        inFlight = translator
+        let apiKey: String?
+        if let resolve = options.apiKey {
+            apiKey = await Task.detached(priority: .userInitiated) { resolve() }.value
+        } else {
+            apiKey = nil
+        }
+        let request = TranslationRequest(
+            prompt: prompt, systemPrompt: Self.systemPrompt, schema: Self.schema,
+            model: options.model, workingDirectory: URL(fileURLWithPath: context.cwd),
+            environment: options.environment, apiProxy: options.apiProxy,
+            apiKey: apiKey, baseURL: options.baseURL)
+        let result = await translator.translate(request)
+        inFlight = nil
         isThinking = false
         thinkingSince = nil
 
         switch result {
-        case .success(let object):
-            let entry = Self.entry(from: object)
+        case .success(let reply):
+            let entry = Self.entry(from: reply)
             append(entry)
             if autoRunSafe, entry.command != nil, entry.risk == .safe { return entry }
         case .failure(.cancelled):
@@ -161,7 +187,7 @@ final class CommandAssistant: ObservableObject {
         return nil
     }
 
-    func cancel() { cli?.cancel() }
+    func cancel() { inFlight?.cancel() }
 
     func clear() {
         guard !isThinking else { return }
@@ -250,10 +276,14 @@ final class CommandAssistant: ObservableObject {
     }
 
     nonisolated static func entry(from object: [String: Any]) -> AssistantEntry {
-        let raw = (object["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        entry(from: CommandReply(json: object) ?? CommandReply(command: nil, explanation: "", risk: "caution"))
+    }
+
+    nonisolated static func entry(from reply: CommandReply) -> AssistantEntry {
+        let raw = reply.command?.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = (raw?.isEmpty == false) ? raw : nil
-        let explanation = (object["explanation"] as? String) ?? ""
-        let modelRisk = (object["risk"] as? String).flatMap(CommandRisk.init(rawValue:)) ?? .caution
+        let explanation = reply.explanation
+        let modelRisk = CommandRisk(rawValue: reply.risk) ?? .caution
         let risk = command.map { max(modelRisk, CommandRisk.assess($0)) }
         return AssistantEntry(role: .assistant, text: explanation, command: command,
                               risk: risk, status: command == nil ? nil : .proposed)
@@ -277,7 +307,7 @@ final class CommandAssistant: ObservableObject {
     private func persist() {
         let retained = Array(entries.suffix(Self.maxStoredEntries))
         if let data = try? JSONEncoder().encode(retained) {
-            defaults.set(data, forKey: Self.entriesKey)
+            defaults.set(data, forKey: entriesKey)
         }
     }
 }
@@ -294,4 +324,19 @@ extension TerminalContext {
             recentOutput: pane?.host?.recentOutput(lines: outputLines) ?? "",
             broadcastPaneCount: broadcastPaneCount)
     }
+}
+
+/// One `CommandAssistant` per provider, shared by the sidebar panels so a
+/// conversation survives switching between Claude, Codex, and friends.
+@MainActor
+final class AssistantHub: ObservableObject {
+    let assistants: [AssistantProvider: CommandAssistant]
+
+    init(defaults: UserDefaults = .standard) {
+        assistants = Dictionary(uniqueKeysWithValues: AssistantProvider.allCases.map {
+            ($0, CommandAssistant(provider: $0, defaults: defaults))
+        })
+    }
+
+    subscript(provider: AssistantProvider) -> CommandAssistant { assistants[provider]! }
 }

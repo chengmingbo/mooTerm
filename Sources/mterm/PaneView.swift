@@ -96,7 +96,14 @@ struct PaneView: View {
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.gray.opacity(0.15))
         .contentShape(Rectangle())
-        .onTapGesture { tab.setActive(paneID: pane.id) }
+        .gesture(
+            TapGesture(count: 2)
+                .onEnded { tab.toggleMaximise(paneID: pane.id) }
+                .exclusively(before: TapGesture().onEnded { tab.setActive(paneID: pane.id) })
+        )
+        .help(tab.zoomedPaneID == pane.id
+              ? "Double-click to restore all panes"
+              : "Double-click to fill the tab with this pane")
     }
 
     @ViewBuilder

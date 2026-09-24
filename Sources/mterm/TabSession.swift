@@ -157,6 +157,17 @@ final class TabSession: ObservableObject, Identifiable {
         zoomedPaneID = id
     }
 
+    /// Double-clicking a pane header: fill the tab with that pane, or
+    /// restore the layout if it already does.
+    func toggleMaximise(paneID: UUID) {
+        if zoomedPaneID == paneID {
+            unzoom()
+        } else {
+            _activePaneID = paneID
+            zoomActive(bumpFont: false)
+        }
+    }
+
     /// Restore the original split tree view.
     func unzoom() {
         _zoomBumpFont = false

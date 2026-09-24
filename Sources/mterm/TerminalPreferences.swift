@@ -34,18 +34,44 @@ final class TerminalPreferences: ObservableObject {
         }
     }
 
-    /// Model alias passed to `claude --model` for the command panel.
-    /// Haiku is fast and plenty for command translation; empty = CLI default.
-    static let defaultClaudeModel = "haiku"
-    static let claudeModelChoices: [(id: String, label: String)] = [
-        ("haiku", "Haiku (fastest)"),
-        ("sonnet", "Sonnet"),
-        ("opus", "Opus"),
-        ("", "Claude Code default"),
-    ]
+    static let providerModelsKey = "mTerm.provider.models"
+    static let providerBaseURLsKey = "mTerm.provider.baseURLs"
 
-    @Published var claudeModel: String {
-        didSet { defaults.set(claudeModel, forKey: Self.claudeModelKey) }
+    /// Model per provider (raw value → model id; "" = the tool's default).
+    @Published private var providerModels: [String: String] {
+        didSet { defaults.set(providerModels, forKey: Self.providerModelsKey) }
+    }
+    /// API endpoint per HTTP provider.
+    @Published private var providerBaseURLs: [String: String] {
+        didSet { defaults.set(providerBaseURLs, forKey: Self.providerBaseURLsKey) }
+    }
+
+    func model(for provider: AssistantProvider) -> String {
+        providerModels[provider.rawValue] ?? provider.defaultModel
+    }
+
+    func setModel(_ model: String, for provider: AssistantProvider) {
+        providerModels[provider.rawValue] = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func baseURL(for provider: AssistantProvider) -> String? {
+        providerBaseURLs[provider.rawValue] ?? provider.baseURLChoices.first?.url
+    }
+
+    func setBaseURL(_ url: String, for provider: AssistantProvider) {
+        providerBaseURLs[provider.rawValue] = url
+    }
+
+    /// Proxy for HTTP providers (URLSession follows the system proxy itself).
+    var apiProxy: APIProxy {
+        switch proxyMode {
+        case .automatic:
+            // Explicit variables mTerm was launched with win over the system proxy.
+            if let env = ProxyConfiguration.fromEnvironment(ProcessInfo.processInfo.environment) { return .custom(env) }
+            return .system
+        case .custom: return ProxyConfiguration.custom(customProxy).map(APIProxy.custom) ?? .system
+        case .off: return .none
+        }
     }
 
     @Published var proxyMode: ProxyMode {
@@ -70,9 +96,9 @@ final class TerminalPreferences: ObservableObject {
         }
     }
 
-    /// Variables for the Claude panel's `claude` process. With the proxy
+    /// Variables for CLI assistants (`claude`, `codex`). With the proxy
     /// off, clear any inherited ones so "None" really means none.
-    var claudeEnvironment: [String: String] {
+    var cliEnvironment: [String: String] {
         if proxyMode == .off {
             return Dictionary(uniqueKeysWithValues: ProxyConfiguration.variableNames.map { ($0, "") })
         }
@@ -90,7 +116,13 @@ final class TerminalPreferences: ObservableObject {
         self.defaults = defaults
         let stored = defaults.object(forKey: Self.scrollbackKey) as? Int
         self.scrollbackLines = Self.clampScrollback(stored ?? Self.defaultScrollback)
-        self.claudeModel = defaults.string(forKey: Self.claudeModelKey) ?? Self.defaultClaudeModel
+        var models = defaults.dictionary(forKey: Self.providerModelsKey) as? [String: String] ?? [:]
+        // 0.2: the Claude panel's model used to be a single setting.
+        if models[AssistantProvider.claude.rawValue] == nil, let legacy = defaults.string(forKey: Self.claudeModelKey) {
+            models[AssistantProvider.claude.rawValue] = legacy
+        }
+        self.providerModels = models
+        self.providerBaseURLs = defaults.dictionary(forKey: Self.providerBaseURLsKey) as? [String: String] ?? [:]
         self.proxyMode = defaults.string(forKey: Self.proxyModeKey).flatMap(ProxyMode.init(rawValue:)) ?? .automatic
         self.customProxy = defaults.string(forKey: Self.customProxyKey) ?? ""
         self.proxyInPanes = defaults.bool(forKey: Self.proxyInPanesKey)

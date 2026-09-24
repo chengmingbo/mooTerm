@@ -5,12 +5,14 @@ extension UserDefaults {
     static let assistantWidthKey = "mTerm.assistant.width"
 }
 
-/// Narrow left-hand Claude panel: describe what you want in plain language,
-/// get a shell command (usually a pipeline), review it, and run it in the
-/// active pane. Modelled on NemoMac's Claude sidebar, but Claude only
-/// *proposes* commands — mTerm types them into your shell when you accept.
+/// Narrow left-hand assistant panel (Claude, Codex, DeepSeek, MiniMax):
+/// describe what you want in plain language, get a shell command (usually a
+/// pipeline), review it, and run it in the active pane. Modelled on
+/// NemoMac's Claude sidebar, but the model only *proposes* commands — mTerm
+/// types them into your shell when you accept.
 struct AssistantPanelView: View {
-    @EnvironmentObject var assistant: CommandAssistant
+    let provider: AssistantProvider
+    @ObservedObject var assistant: CommandAssistant
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var preferences: TerminalPreferences
     @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
@@ -43,9 +45,18 @@ struct AssistantPanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "sparkles").foregroundStyle(.purple)
-            Text("Claude").font(.headline)
-            Spacer()
+            Image(systemName: provider.systemImage).foregroundStyle(provider.tint)
+            Text(provider.title).font(.headline)
+            let model = preferences.model(for: provider)
+            if !model.isEmpty {
+                Text(model)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help("Model — change in Settings (⌘,)")
+            }
+            Spacer(minLength: 4)
             Toggle(isOn: $assistant.autoRunSafe) {
                 Image(systemName: "bolt.fill")
             }
@@ -60,7 +71,7 @@ struct AssistantPanelView: View {
                 .help("Clear conversation")
             Button { sidebarSelection = "" } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless)
-                .help("Close panel (⇧⌘A)")
+                .help("Close panel")
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
     }
@@ -72,7 +83,7 @@ struct AssistantPanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if assistant.entries.isEmpty && !assistant.isThinking {
-                        EmptyStateView { example in
+                        EmptyStateView(providerName: provider.title) { example in
                             input = example
                             send()
                         }
@@ -81,7 +92,7 @@ struct AssistantPanelView: View {
                         entryView(entry).id(entry.id)
                     }
                     if assistant.isThinking {
-                        ThinkingRow(since: assistant.thinkingSince, onCancel: assistant.cancel)
+                        ThinkingRow(providerName: provider.title, since: assistant.thinkingSince, onCancel: assistant.cancel)
                             .id("thinking")
                     }
                 }
@@ -165,13 +176,22 @@ struct AssistantPanelView: View {
         guard !text.isEmpty, !assistant.isThinking else { return }
         input = ""
         let context = TerminalContext.of(targetPane, broadcastPaneCount: broadcastCount)
+        let provider = self.provider
+        var options = AssistantOptions(model: preferences.model(for: provider))
+        options.environment = preferences.cliEnvironment
+        options.apiProxy = preferences.apiProxy
+        options.baseURL = preferences.baseURL(for: provider)
+        if provider.usesAPIKey { options.apiKey = Self.keyResolver(for: provider) }
         Task {
-            if let autoRun = await assistant.submit(text, context: context, model: preferences.claudeModel,
-                                                    environment: preferences.claudeEnvironment),
+            if let autoRun = await assistant.submit(text, context: context, options: options),
                let command = autoRun.command {
                 run(autoRun, command)
             }
         }
+    }
+
+    nonisolated private static func keyResolver(for provider: AssistantProvider) -> @Sendable () -> String? {
+        { APIKeyStore.resolve(for: provider) }
     }
 
     private var broadcastCount: Int {
@@ -345,6 +365,7 @@ private struct RiskBadge: View {
 }
 
 private struct ThinkingRow: View {
+    let providerName: String
     let since: Date?
     let onCancel: () -> Void
 
@@ -353,7 +374,7 @@ private struct ThinkingRow: View {
             ProgressView().controlSize(.small)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let seconds = since.map { Int(context.date.timeIntervalSince($0)) } ?? 0
-                Text("Thinking… \(seconds)s").foregroundStyle(.secondary)
+                Text("\(providerName) is thinking… \(seconds)s").foregroundStyle(.secondary)
             }
             Spacer()
             Button("Cancel", action: onCancel)
@@ -366,6 +387,7 @@ private struct ThinkingRow: View {
 }
 
 private struct EmptyStateView: View {
+    let providerName: String
     let onPick: (String) -> Void
     private let examples = [
         "10 largest files under here",
@@ -377,7 +399,7 @@ private struct EmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Ask in plain language — Claude writes the command, you review it, mTerm runs it in the active pane.")
+            Text("Ask in plain language — \(providerName) writes the command, you review it, mTerm runs it in the active pane.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

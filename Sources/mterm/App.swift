@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var layoutStore: LayoutStore!
     var windowStore: WindowStore!
     var preferences: TerminalPreferences!
-    var assistant: CommandAssistant!
+    var assistantHub: AssistantHub!
     private var settingsWindow: NSWindow?
     weak var themeMenu: NSMenu?
     weak var layoutsMenu: NSMenu?
@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         layoutStore = LayoutStore()
         windowStore = WindowStore()
         preferences = TerminalPreferences()
-        assistant = CommandAssistant()
+        assistantHub = AssistantHub()
 
         let contentView = ContentView()
             .environmentObject(sessionStore)
@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             .environmentObject(layoutStore)
             .environmentObject(windowStore)
             .environmentObject(preferences)
-            .environmentObject(assistant)
+            .environmentObject(assistantHub)
             .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
 
@@ -220,10 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let prevPane = NSMenuItem(title: "Previous Pane", action: #selector(previousPaneAction), keyEquivalent: "[")
         prevPane.target = self
         viewMenu.addItem(prevPane)
-        let claude = NSMenuItem(title: "Claude Panel", action: #selector(toggleAssistantAction), keyEquivalent: "a")
-        claude.keyEquivalentModifierMask = [.command, .shift]
-        claude.target = self
-        viewMenu.addItem(claude)
+        // Activity-bar panels: ⌃⌘1…⌃⌘4 in bar order; Claude also keeps ⇧⌘A.
+        for (index, item) in SidebarItem.allCases.enumerated() {
+            let menuItem = NSMenuItem(title: "\(item.title) Panel", action: #selector(toggleSidebarAction(_:)),
+                                      keyEquivalent: "\(index + 1)")
+            menuItem.keyEquivalentModifierMask = [.command, .control]
+            menuItem.target = self
+            menuItem.representedObject = item.rawValue
+            viewMenu.addItem(menuItem)
+        }
+        let claudeAlias = NSMenuItem(title: "Claude Panel", action: #selector(toggleSidebarAction(_:)), keyEquivalent: "a")
+        claudeAlias.keyEquivalentModifierMask = [.command, .shift]
+        claudeAlias.target = self
+        claudeAlias.representedObject = SidebarItem.claude.rawValue
+        claudeAlias.isHidden = true
+        claudeAlias.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(claudeAlias)
         let dim = NSMenuItem(title: "Dim Inactive Panes", action: #selector(toggleDimAction(_:)), keyEquivalent: "")
         dim.target = self
         dim.state = Self.dimInactivePanes ? .on : .off
@@ -373,8 +385,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(selectScheme(_:)):
             item.state = (item.representedObject as? String) == schemeStore.current.id ? .on : .off
-        case #selector(toggleAssistantAction):
-            item.state = UserDefaults.selectedSidebarItem == .claude ? .on : .off
+        case #selector(toggleSidebarAction(_:)):
+            let target = (item.representedObject as? String).flatMap(SidebarItem.init(rawValue:))
+            item.state = target != nil && UserDefaults.selectedSidebarItem == target ? .on : .off
         case #selector(toggleDimAction(_:)):
             item.state = Self.dimInactivePanes ? .on : .off
         default:
@@ -383,15 +396,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return true
     }
 
-    /// ⇧⌘A: open the Claude panel and focus it; if it's open and focused,
+    /// Open a sidebar panel and focus it; if it's already open and the
+    /// terminal has focus, just focus the panel; if the panel has focus,
     /// close it and return to the terminal.
-    @objc func toggleAssistantAction() {
-        let visible = UserDefaults.selectedSidebarItem == .claude
+    @objc func toggleSidebarAction(_ sender: NSMenuItem) {
+        guard let item = (sender.representedObject as? String).flatMap(SidebarItem.init(rawValue:)) else { return }
+        let visible = UserDefaults.selectedSidebarItem == item
         let terminalFocused = window?.firstResponder is MTermTerminalView
         if visible && terminalFocused {
             NotificationCenter.default.post(name: .mtermFocusAssistant, object: nil)
         } else {
-            UserDefaults.selectedSidebarItem = visible ? nil : .claude
+            UserDefaults.selectedSidebarItem = visible ? nil : item
             if visible, let view = sessionStore.activeTab?.activePane?.host?.view {
                 window?.makeFirstResponder(view)
             }
@@ -580,13 +595,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Append a line to ~/Library/Logs/mTerm.log. Used for ad-hoc debugging; the
     /// menu / theme / font subsystems no longer call it during normal flow.
-    static let logURL: URL = {
+    nonisolated static let logURL: URL = {
         let home = NSHomeDirectory()
         return URL(fileURLWithPath: home)
             .appendingPathComponent("Library/Logs/mTerm.log")
     }()
 
-    static func log(_ message: String) {
+    nonisolated static func log(_ message: String) {
         let line = "\(Date()) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
         let dir = logURL.deletingLastPathComponent()

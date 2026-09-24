@@ -2,6 +2,52 @@ import AppKit
 import Combine
 import Foundation
 
+/// What double-clicking a title-bar-like area does, per System Settings →
+/// Desktop & Dock → "Double-click a window's title bar to".
+enum WindowDoubleClick {
+    enum Action: Equatable { case zoom, minimize, none }
+
+    static func action(for setting: String?) -> Action {
+        switch setting {
+        case "Minimize": return .minimize
+        case "None": return .none
+        default: return .zoom  // "Maximize", "Fill", or unset
+        }
+    }
+
+    /// Borderless windows (Show Window Borders off) ignore `zoom`, so
+    /// toggle between the screen's visible frame and the previous frame.
+    @MainActor
+    private static func toggleFill(_ window: NSWindow) {
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        if let previous = preFillFrames[window.windowNumber], window.frame == screen.visibleFrame {
+            window.setFrame(previous, display: true, animate: true)
+            preFillFrames[window.windowNumber] = nil
+        } else {
+            preFillFrames[window.windowNumber] = window.frame
+            window.setFrame(screen.visibleFrame, display: true, animate: true)
+        }
+    }
+
+    @MainActor private static var preFillFrames: [Int: NSRect] = [:]
+
+    @MainActor
+    static func perform(on window: NSWindow?) {
+        guard let window else { return }
+        let setting = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
+        switch action(for: setting) {
+        case .zoom:
+            if window.styleMask.contains(.titled) {
+                window.zoom(nil)
+            } else {
+                toggleFill(window)
+            }
+        case .minimize: window.miniaturize(nil)
+        case .none: break
+        }
+    }
+}
+
 /// Window-level preferences: borderless mode + always-on-top. Both persist
 /// to UserDefaults. The window is mutated by the AppDelegate whenever these
 /// flip so the menu checkmarks stay in sync.
