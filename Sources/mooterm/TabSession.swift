@@ -149,7 +149,7 @@ final class TabSession: ObservableObject, Identifiable {
         return result
     }
 
-    /// Zoom into the active pane (Terminator semantics: hide other panes,
+    /// Zoom into the active pane (as in Terminator: hide other panes,
     /// also bump the font size by +2 until unzoom).
     func zoomActive(bumpFont: Bool) {
         guard let id = activePaneID else { return }

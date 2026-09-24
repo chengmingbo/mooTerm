@@ -207,7 +207,7 @@ Sources/mooterm/
 
 - Persist/restore layouts
 - Per-profile colour/font
-- Plugins (Terminator's `~/.config/terminator/plugins` equivalent)
+- Plugins (like the plugin folder Terminator offers)
 
 ## License
 

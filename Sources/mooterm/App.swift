@@ -259,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         viewMenu.addItem(broadcast)
         viewMenu.addItem(NSMenuItem.separator())
 
-        // Zoom & Maximise — Terminator semantics. Zoom bumps the font size
+        // Zoom & Maximise, as in Terminator (which inspired mooTerm). Zoom bumps the font size
         // by +2pt while zoomed; Maximise keeps the font.
         let zoom = NSMenuItem(title: "Zoom Pane", action: #selector(zoomAction), keyEquivalent: "z")
         zoom.keyEquivalentModifierMask = [.command, .shift]
