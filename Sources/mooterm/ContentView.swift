@@ -172,19 +172,22 @@ struct TabContentView: View {
     @ObservedObject var tab: TabSession
 
     var body: some View {
-        SplitTreeView(node: tab.root, tab: tab)
+        SplitTreeView(node: tab.root, tab: tab, isRoot: true)
     }
 }
 
 struct SplitTreeView: View {
     @ObservedObject var node: SplitNode
     @ObservedObject var tab: TabSession
+    /// Only the root handles zoom; nested levels checking it too made
+    /// SwiftUI build several views for the zoomed pane at once.
+    var isRoot = false
 
     var body: some View {
         // When zoomed, only render the focused pane and ignore the rest of
         // the split tree. The original tree is preserved in tab.root, so
         // unzoom restores the full layout without any work.
-        if let zoomID = tab.zoomedPaneID, let pane = tab.findPane(id: zoomID, in: node) {
+        if isRoot, let zoomID = tab.zoomedPaneID, let pane = tab.findPane(id: zoomID, in: node) {
             PaneView(pane: pane, tab: tab)
         } else if let pane = node.pane {
             PaneView(pane: pane, tab: tab)

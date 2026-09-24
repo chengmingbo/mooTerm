@@ -977,3 +977,145 @@ func liveOpencodePresetTranslatesARequest() async {
     let preset = CustomAssistant.presets.first { $0.label == "opencode" }!.make()
     expectLiveReply("opencode", await preset.makeTranslator().translate(liveRequest(model: "")))
 }
+
+// MARK: - Closing a split keeps the survivor's terminal on screen
+
+@MainActor
+private func renderTab(_ tab: TabSession, store: SessionStore) -> NSWindow {
+    let defaults = UserDefaults(suiteName: "mooterm-render-\(UUID().uuidString)")!
+    let view = TabContentView(tab: tab)
+        .environmentObject(store)
+        .environmentObject(ColorSchemeStore(defaults: defaults))
+        .environmentObject(FontSizeStore(defaults: defaults))
+        .environmentObject(TerminalPreferences(defaults: defaults))
+        .frame(width: 800, height: 500)
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 500),
+                          styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = NSHostingController(rootView: view)
+    window.orderFront(nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    return window
+}
+
+@MainActor
+private func expectOnScreen(_ pane: Pane, in window: NSWindow, _ label: String) {
+    let view = pane.host?.view
+    #expect(view?.window === window, "\(label): terminal view is in the window")
+    let size = view?.frame.size ?? .zero
+    #expect(size.width > 100 && size.height > 100, "\(label): terminal has a real size, got \(size)")
+}
+
+@MainActor
+@Test(arguments: [SplitDirection.vertical, .horizontal], [false, true])
+func closingASplitKeepsTheOtherTerminalVisible(direction: SplitDirection, closeOriginal: Bool) {
+    let store = SessionStore()
+    let tab = store.activeTab!
+    let window = renderTab(tab, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    let original = tab.panes[0]
+    expectOnScreen(original, in: window, "before split")
+
+    tab.split(direction)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    let added = tab.activePane!
+    expectOnScreen(original, in: window, "original after split")
+    expectOnScreen(added, in: window, "new pane after split")
+
+    let (closing, survivor) = closeOriginal ? (original, added) : (added, original)
+    tab.closePane(closing.id)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    expectOnScreen(survivor, in: window, "survivor after close")
+}
+
+@MainActor
+@Test func terminalsSurviveZoomAndNestedClose() {
+    let store = SessionStore()
+    let tab = store.activeTab!
+    let window = renderTab(tab, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
+
+    // [a | (b over c)]
+    let a = tab.panes[0]
+    tab.split(.vertical); settle()
+    let b = tab.activePane!
+    tab.split(.horizontal); settle()
+    let c = tab.activePane!
+    let views = [a, b, c].map { $0.host?.view }
+
+    tab.toggleMaximise(paneID: b.id); settle()
+    expectOnScreen(b, in: window, "zoomed pane")
+    tab.toggleMaximise(paneID: b.id); settle()
+    for (pane, name) in [(a, "a"), (b, "b"), (c, "c")] { expectOnScreen(pane, in: window, "\(name) after unzoom") }
+
+    tab.closePane(b.id); settle()
+    expectOnScreen(a, in: window, "a after closing nested b")
+    expectOnScreen(c, in: window, "c after closing nested b")
+    #expect([a, c].map { $0.host?.view } == [views[0], views[2]], "same terminals (and shells), not new ones")
+}
+
+/// The app's real window: ContentView with every store, sized like AppDelegate does.
+@MainActor
+private func makeAppWindow(defaults: UserDefaults, store: SessionStore) -> NSWindow {
+    let contentView = ContentView()
+        .environmentObject(store)
+        .environmentObject(ColorSchemeStore(defaults: defaults))
+        .environmentObject(FontSizeStore(defaults: defaults))
+        .environmentObject(LayoutStore())
+        .environmentObject(WindowStore(defaults: defaults))
+        .environmentObject(TerminalPreferences(defaults: defaults))
+        .environmentObject(AssistantHub(defaults: defaults))
+        .environmentObject(CustomAssistantStore(defaults: defaults))
+        .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
+               minHeight: 480, idealHeight: 600, maxHeight: .infinity)
+    let hosting = NSHostingController(rootView: contentView)
+    hosting.sizingOptions = [.minSize]  // as AppDelegate does
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = hosting
+    window.setContentSize(NSSize(width: 900, height: 600))
+    window.center()
+    window.makeKeyAndOrderFront(nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    return window
+}
+
+@MainActor
+@Test func realAppWindowZoomsFromTheTabBar() throws {
+    try #require(NSScreen.main != nil)
+    let defaults = UserDefaults(suiteName: "mooterm-appwin-\(UUID().uuidString)")!
+    let store = SessionStore()
+    let window = makeAppWindow(defaults: defaults, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    print("appwin frame", window.frame, "contentMax", window.contentMaxSize, "max", window.maxSize,
+          "zoomable", window.isZoomable, "screen", window.screen?.visibleFrame ?? .zero)
+
+    // 1. Zoom itself (what the real title bar's double-click does).
+    let before = window.frame
+    window.zoom(nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    print("appwin after zoom(nil)", window.frame)
+    #expect(window.frame.width > before.width + 100 && window.frame.height > before.height + 100,
+            "zoom grows the real window, not just moves it")
+    window.zoom(nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+
+    // 2. Double-click on empty tab-bar space.
+    let area = try #require(findView(TitleBarAreaView.self, in: window.contentView!), "tab-bar double-click area exists")
+    let point = area.convert(NSPoint(x: area.bounds.midX, y: area.bounds.midY), to: nil)
+    let beforeClick = window.frame
+    sendDoubleClick(to: window, at: point)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    print("appwin after double-click", window.frame)
+    #expect(window.frame.width > beforeClick.width + 100, "double-clicking empty tab-bar space zooms the window")
+}
+
+@MainActor
+private func findView<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+    if let match = root as? T { return match }
+    for sub in root.subviews { if let found = findView(type, in: sub) { return found } }
+    return nil
+}

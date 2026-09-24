@@ -28,6 +28,8 @@ final class Pane: ObservableObject, Identifiable {
     var onInput: ((ArraySlice<UInt8>) -> Void)?
 
     private(set) var host: TerminalHostView?
+    /// Containers SwiftUI currently shows this pane's terminal in.
+    var containers = TerminalContainerList()
 
     init(cwd: String? = nil) {
         // Start at $HOME. Use NSHomeDirectory() (which falls back to

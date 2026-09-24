@@ -72,7 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
 
         let hosting = NSHostingController(rootView: contentView)
-        hosting.preferredContentSize = NSSize(width: 900, height: 600)
+        // Only let SwiftUI impose the minimum size. By default the window
+        // also tracks the content's ideal size (900×600), which snapped it
+        // back whenever it was zoomed — so double-clicking the title bar
+        // or tab bar did nothing.
+        hosting.sizingOptions = [.minSize]
         let win = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
