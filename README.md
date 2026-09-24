@@ -4,8 +4,8 @@ A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminato
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.
 
 > Splits, tabs, broadcast groups, themes, saved layouts, and iTerm2-style
-> navigation. Settings, profiles, drag-drop rearrange, and a plugin host are not
-> implemented yet — see `TODO.md`.
+> navigation, plus a Settings window. Profiles, drag-drop rearrange, and a
+> plugin host are not implemented yet — see `TODO.md`.
 
 ## Build & run
 
