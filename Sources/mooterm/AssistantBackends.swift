@@ -20,6 +20,61 @@ struct CommandReply: Equatable, Sendable {
         self.risk = (object["risk"] as? String) ?? "caution"
     }
 
+    /// Find the answer in arbitrary tool output: strips ANSI colour codes and
+    /// <think> blocks, then tries every balanced {...} object (last first),
+    /// unwrapping CLI envelopes like {"response": "..."}; falls back to a
+    /// fenced code block as the command.
+    static func extract(from raw: String) -> CommandReply? {
+        var text = raw.replacingOccurrences(of: #"\x{1B}\[[0-9;?]*[A-Za-z]"#, with: "", options: .regularExpression)
+        if let end = text.range(of: "</think>", options: .backwards) { text = String(text[end.upperBound...]) }
+        for candidate in jsonObjects(in: text).reversed() {
+            if let reply = CommandReply(json: candidate) { return reply }
+            for key in ["response", "result", "text", "content", "output", "message"] {
+                if let inner = candidate[key] as? String, let reply = extract(from: inner) { return reply }
+            }
+        }
+        // No JSON: accept a fenced code block as the command.
+        if let block = text.range(of: #"```[a-zA-Z]*\n([\s\S]*?)```"#, options: .regularExpression) {
+            let body = text[block].split(separator: "\n").dropFirst().dropLast().joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                let explanation = text.replacingCharacters(in: block, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return CommandReply(command: body, explanation: explanation, risk: "caution")
+            }
+        }
+        return nil
+    }
+
+    /// Every top-level balanced JSON object in `text`, in order.
+    static func jsonObjects(in text: String) -> [[String: Any]] {
+        var objects: [[String: Any]] = []
+        let chars = Array(text.utf8)
+        var i = 0
+        while i < chars.count {
+            guard chars[i] == UInt8(ascii: "{") else { i += 1; continue }
+            var depth = 0, inString = false, escaped = false, j = i
+            var end: Int?
+            while j < chars.count {
+                let c = chars[j]
+                if inString {
+                    if escaped { escaped = false }
+                    else if c == UInt8(ascii: "\\") { escaped = true }
+                    else if c == UInt8(ascii: "\"") { inString = false }
+                } else if c == UInt8(ascii: "\"") { inString = true }
+                else if c == UInt8(ascii: "{") { depth += 1 }
+                else if c == UInt8(ascii: "}") { depth -= 1; if depth == 0 { end = j; break } }
+                j += 1
+            }
+            if let end, let object = try? JSONSerialization.jsonObject(with: Data(chars[i...end])) as? [String: Any] {
+                objects.append(object)
+                i = end + 1
+            } else {
+                i += 1
+            }
+        }
+        return objects
+    }
+
     /// Parse model text that should be a JSON object but may be wrapped in
     /// ```json fences or preceded by <think>…</think> reasoning.
     init?(text: String) {
@@ -121,7 +176,25 @@ final class LoginShellProcess: @unchecked Sendable {
     func run(tool: String, fallbackPaths: [String], arguments: [String], stdin: String,
              workingDirectory: URL, environment extra: [String: String],
              timeout: TimeInterval) -> Result<Output, AssistantFailure> {
-        let launch = Self.launch(tool: tool, arguments: arguments)
+        var environment = extra
+        if let fallback = fallbackPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            environment["MOOTERM_TOOL_BIN"] = fallback
+        }
+        return execute(Self.launch(tool: tool, arguments: arguments), stdin: stdin,
+                       workingDirectory: workingDirectory, environment: environment, timeout: timeout)
+    }
+
+    /// Run a user-written command line (custom assistants) the same way.
+    func runScript(_ script: String, stdin: String, workingDirectory: URL,
+                   environment extra: [String: String], timeout: TimeInterval) -> Result<Output, AssistantFailure> {
+        let shell = TerminalHostView.resolveLoginShell()
+        return execute((shell, ["-l", "-i", "-c", script, "mooterm-custom"]), stdin: stdin,
+                       workingDirectory: workingDirectory, environment: extra, timeout: timeout)
+    }
+
+    private func execute(_ launch: (executable: String, arguments: [String]), stdin: String,
+                         workingDirectory: URL, environment extra: [String: String],
+                         timeout: TimeInterval) -> Result<Output, AssistantFailure> {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launch.executable)
         process.arguments = launch.arguments
@@ -129,9 +202,6 @@ final class LoginShellProcess: @unchecked Sendable {
         var environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         environment["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
-        if let fallback = fallbackPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            environment["MOOTERM_TOOL_BIN"] = fallback
-        }
         for (key, value) in extra { environment[key] = value.isEmpty ? nil : value }
         process.environment = environment
 
@@ -331,13 +401,16 @@ final class CodexCLI: CommandTranslator, @unchecked Sendable {
 final class ChatCompletionsClient: CommandTranslator, @unchecked Sendable {
     let providerName: String
     let keyVariable: String
+    /// False for servers that need no auth (e.g. local Ollama).
+    let requiresKey: Bool
     private let lock = NSLock()
     private var task: URLSessionDataTask?
     private var wasCancelled = false
 
-    init(providerName: String, keyVariable: String) {
+    init(providerName: String, keyVariable: String, requiresKey: Bool = true) {
         self.providerName = providerName
         self.keyVariable = keyVariable
+        self.requiresKey = requiresKey
     }
 
     static func body(for request: TranslationRequest, jsonMode: Bool) -> [String: Any] {
@@ -380,7 +453,8 @@ final class ChatCompletionsClient: CommandTranslator, @unchecked Sendable {
     }
 
     func translate(_ request: TranslationRequest) async -> Result<CommandReply, AssistantFailure> {
-        guard let key = request.apiKey, !key.isEmpty else {
+        let key = request.apiKey ?? ""
+        if key.isEmpty && requiresKey {
             return .failure(.missingAPIKey(provider: providerName, variable: keyVariable))
         }
         guard let base = request.baseURL, let url = URL(string: base.trimmingSuffix("/") + "/chat/completions") else {
@@ -398,7 +472,7 @@ final class ChatCompletionsClient: CommandTranslator, @unchecked Sendable {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if !key.isEmpty { urlRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         urlRequest.httpBody = try? JSONSerialization.data(withJSONObject: Self.body(for: request, jsonMode: jsonMode))
         let session = Self.session(proxy: request.apiProxy)
 
@@ -443,7 +517,7 @@ final class ChatCompletionsClient: CommandTranslator, @unchecked Sendable {
             return .failure(.failed("\(provider) API error \(code): \(base["status_msg"] as? String ?? "")"))
         }
         let content = ((object?["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String
-        guard let content, let reply = CommandReply(text: content) else {
+        guard let content, let reply = CommandReply.extract(from: content) else {
             return .failure(.failed("\(provider) returned an unreadable response."))
         }
         return .success(reply)

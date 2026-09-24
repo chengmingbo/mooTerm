@@ -97,13 +97,16 @@ struct AssistantOptions: Sendable {
 final class CommandAssistant: ObservableObject {
     static let maxStoredEntries = 60
 
-    let provider: AssistantProvider
-    /// Claude keeps the keys it had before other providers existed.
+    /// Names this assistant's saved conversation: a provider id, or
+    /// `custom.<uuid>`. Claude keeps the keys it had before others existed.
+    let storageID: String
     private var autoRunKey: String {
-        provider == .claude ? "mooTerm.assistant.autoRunSafe" : "mooTerm.assistant.\(provider.rawValue).autoRunSafe"
+        storageID == AssistantProvider.claude.rawValue
+            ? "mooTerm.assistant.autoRunSafe" : "mooTerm.assistant.\(storageID).autoRunSafe"
     }
     private var entriesKey: String {
-        provider == .claude ? "mooTerm.assistant.entries" : "mooTerm.assistant.\(provider.rawValue).entries"
+        storageID == AssistantProvider.claude.rawValue
+            ? "mooTerm.assistant.entries" : "mooTerm.assistant.\(storageID).entries"
     }
 
     @Published private(set) var entries: [AssistantEntry] = []
@@ -119,10 +122,15 @@ final class CommandAssistant: ObservableObject {
     /// Creates the backend for each request. Swappable for tests.
     var makeTranslator: () -> CommandTranslator
 
-    init(provider: AssistantProvider = .claude, defaults: UserDefaults = .standard) {
-        self.provider = provider
+    convenience init(provider: AssistantProvider = .claude, defaults: UserDefaults = .standard) {
+        self.init(storageID: provider.rawValue, defaults: defaults, makeTranslator: { provider.makeTranslator() })
+    }
+
+    init(storageID: String, defaults: UserDefaults = .standard,
+         makeTranslator: @escaping () -> CommandTranslator) {
+        self.storageID = storageID
         self.defaults = defaults
-        self.makeTranslator = { provider.makeTranslator() }
+        self.makeTranslator = makeTranslator
         self.autoRunSafe = false
         self.autoRunSafe = defaults.bool(forKey: autoRunKey)
         if let data = defaults.data(forKey: entriesKey),
@@ -326,17 +334,33 @@ extension TerminalContext {
     }
 }
 
-/// One `CommandAssistant` per provider, shared by the sidebar panels so a
-/// conversation survives switching between Claude, Codex, and friends.
+/// One `CommandAssistant` per sidebar assistant (built-in or custom),
+/// shared by the panels so a conversation survives switching between them.
 @MainActor
 final class AssistantHub: ObservableObject {
-    let assistants: [AssistantProvider: CommandAssistant]
+    private(set) var assistants: [SidebarItem: CommandAssistant] = [:]
+    private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
-        assistants = Dictionary(uniqueKeysWithValues: AssistantProvider.allCases.map {
-            ($0, CommandAssistant(provider: $0, defaults: defaults))
-        })
+        self.defaults = defaults
+        for provider in AssistantProvider.allCases {
+            assistants[SidebarItem(provider: provider)] = CommandAssistant(provider: provider, defaults: defaults)
+        }
     }
 
-    subscript(provider: AssistantProvider) -> CommandAssistant { assistants[provider]! }
+    subscript(provider: AssistantProvider) -> CommandAssistant { assistants[SidebarItem(provider: provider)]! }
+
+    /// The assistant for `item`, created on first use for custom ones. The
+    /// custom configuration is read on every request, so edits in Settings
+    /// apply without reopening the panel.
+    func assistant(for item: SidebarItem, store: CustomAssistantStore) -> CommandAssistant {
+        if let existing = assistants[item] { return existing }
+        guard let customID = item.customID else { return self[.claude] }
+        let assistant = CommandAssistant(storageID: "custom.\(customID.uuidString)", defaults: defaults) { [weak store] in
+            store?.assistant(id: customID)?.makeTranslator()
+                ?? CustomCommandTranslator(command: "")
+        }
+        assistants[item] = assistant
+        return assistant
+    }
 }

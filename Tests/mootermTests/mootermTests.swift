@@ -616,8 +616,8 @@ func liveDeepSeekTranslatesARequest() async {
 // MARK: - Activity bar
 
 @Test func activityBarStartsWithClaude() {
-    #expect(SidebarItem.allCases.first == .claude)
-    let ids = SidebarItem.allCases.map(\.id)
+    #expect(SidebarItem.builtIns.first == .claude)
+    let ids = SidebarItem.builtIns.map(\.id)
     #expect(Set(ids).count == ids.count)
     #expect(SidebarItem(rawValue: "") == nil, "empty selection means the sidebar is closed")
 }
@@ -725,7 +725,7 @@ func liveDeepSeekTranslatesARequest() async {
 @Test func eachProviderKeepsItsOwnConversation() async {
     let defaults = UserDefaults(suiteName: "mooterm-hub-\(UUID().uuidString)")!
     let hub = AssistantHub(defaults: defaults)
-    #expect(Set(hub.assistants.keys) == Set(AssistantProvider.allCases))
+    #expect(Set(hub.assistants.keys) == Set(SidebarItem.builtIns))
     _ = await hub[.codex].submit("!ls", context: sampleContext, options: haiku)
     #expect(hub[.codex].entries.count == 2)
     #expect(hub[.claude].entries.isEmpty)
@@ -733,8 +733,8 @@ func liveDeepSeekTranslatesARequest() async {
 }
 
 @Test func activityBarHasAllAssistants() {
-    #expect(SidebarItem.allCases.map(\.rawValue) == ["claude", "codex", "deepseek", "minimax"])
-    #expect(SidebarItem.allCases.allSatisfy { $0.provider != nil })
+    #expect(SidebarItem.builtIns.map(\.rawValue) == ["claude", "codex", "deepseek", "minimax"])
+    #expect(SidebarItem.builtIns.allSatisfy { $0.provider != nil })
 }
 
 // MARK: - Double-click
@@ -867,4 +867,113 @@ private func sendDoubleClick(to window: NSWindow, at point: NSPoint) {
     defaults.setPersistentDomain(["mTerm.fontSize": 9.0], forName: oldDomain)
     RenameMigration.run(defaults: defaults, fromDomains: [oldDomain], moveFiles: false)
     #expect(defaults.double(forKey: "mooTerm.fontSize") == 20.0, "runs once")
+}
+
+// MARK: - Custom assistants
+
+@Test func sidebarItemsRoundTripForCustomAssistants() {
+    let id = UUID()
+    let item = SidebarItem(custom: id)
+    #expect(item.customID == id && item.provider == nil)
+    #expect(SidebarItem(rawValue: item.rawValue) == item)
+    #expect(SidebarItem(rawValue: "custom:not-a-uuid") == nil)
+    #expect(SidebarItem(rawValue: "kimi") == nil)
+}
+
+@Test func replyExtractionHandlesRealCLIOutput() {
+    // opencode: JSON, then colour codes and a status line with no braces.
+    let opencode = "{\"command\": \"ls -S | head -5\", \"explanation\": \"x\", \"risk\": \"safe\"}\n\u{1B}[0m\n> build · deepseek-v4-flash\n\u{1B}[0m"
+    #expect(CommandReply.extract(from: opencode)?.command == "ls -S | head -5")
+    // gemini/qwen -o json: an envelope whose "response" holds the answer.
+    let envelope = #"{"response": "```json\n{\"command\": \"pwd\", \"explanation\": \"here\", \"risk\": \"safe\"}\n```", "stats": {"tokens": 12}}"#
+    #expect(CommandReply.extract(from: envelope)?.command == "pwd")
+    // Braces inside strings and a later unrelated object.
+    let tricky = #"note {not json} then {"command": "awk '{print $1}' f", "explanation": "a } b", "risk": "safe"} and {"x": 1}"#
+    #expect(CommandReply.extract(from: tricky)?.command == "awk '{print $1}' f")
+    // No JSON: a fenced block becomes the command, rated for review.
+    let fenced = "Try this:\n```sh\ndu -sh * | sort -h\n```"
+    let reply = CommandReply.extract(from: fenced)
+    #expect(reply?.command == "du -sh * | sort -h" && reply?.risk == "caution")
+    #expect(CommandReply.extract(from: "LLM not set") == nil)
+}
+
+@MainActor
+@Test func customAssistantsPersistAndKeepTheirKeysSeparate() {
+    let defaults = UserDefaults(suiteName: "mooterm-custom-\(UUID().uuidString)")!
+    let store = CustomAssistantStore(defaults: defaults)
+    let kimi = store.add(CustomAssistant.presets[0].make())
+    #expect(kimi.name == "Kimi" && kimi.kind == .openAICompatible)
+    var edited = kimi
+    edited.model = "kimi-k2-0905-preview"
+    store.update(edited)
+    let reloaded = CustomAssistantStore(defaults: defaults)
+    #expect(reloaded.assistants.map(\.model) == ["kimi-k2-0905-preview"])
+    #expect(kimi.keyAccount == "custom.\(kimi.id.uuidString)")
+    reloaded.remove(id: kimi.id)
+    #expect(CustomAssistantStore(defaults: defaults).assistants.isEmpty)
+}
+
+@MainActor
+@Test func customAssistantsAppearAfterBuiltInsWithTheirOptions() {
+    let defaults = UserDefaults(suiteName: "mooterm-custom-\(UUID().uuidString)")!
+    let store = CustomAssistantStore(defaults: defaults)
+    let prefs = TerminalPreferences(defaults: defaults)
+    let qwen = store.add(CustomAssistant.presets[1].make())
+    let cli = store.add(CustomAssistant(name: "my tool", kind: .command, command: "mytool --json"))
+    let descriptors = AssistantDescriptor.all(store: store, preferences: prefs)
+    #expect(descriptors.map(\.title) == ["Claude", "Codex", "DeepSeek", "MiniMax", "Qwen", "my tool"])
+    #expect(descriptors.last?.letter == "M" && descriptors.last?.modelLabel == "mytool")
+
+    let options = assistantOptions(for: SidebarItem(custom: qwen.id), preferences: prefs, store: store)
+    #expect(options.baseURL == "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    #expect(options.model == "qwen-plus")
+    #expect(options.apiKey != nil)
+    #expect(assistantOptions(for: SidebarItem(custom: cli.id), preferences: prefs, store: store).apiKey == nil)
+
+    let hub = AssistantHub(defaults: defaults)
+    let a = hub.assistant(for: SidebarItem(custom: qwen.id), store: store)
+    #expect(a === hub.assistant(for: SidebarItem(custom: qwen.id), store: store))
+    #expect(a.storageID == "custom.\(qwen.id.uuidString)")
+}
+
+private func sampleRequest() -> TranslationRequest {
+    TranslationRequest(prompt: "<request>list files</request>", systemPrompt: "SYSTEM", schema: "{}", model: "m1",
+                       workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()), environment: [:],
+                       apiProxy: .system, apiKey: nil, baseURL: nil)
+}
+
+@Test func customCommandGetsThePromptAndItsAnswerIsParsed() async throws {
+    // A stand-in "CLI": checks stdin and $MOOTERM_PROMPT carry the prompt,
+    // then answers with JSON after some noise.
+    let script = #"input=$(cat); case "$input$MOOTERM_PROMPT" in *SYSTEM*list*SYSTEM*list*) ok=yes;; *) ok=no;; esac; echo "banner {"; printf '{"command":"ls -la","explanation":"%s %s","risk":"safe"}\n' "$ok" "$MOOTERM_MODEL""#
+    let reply = try await CustomCommandTranslator(command: script).translate(sampleRequest()).get()
+    #expect(reply.command == "ls -la")
+    #expect(reply.explanation == "yes m1", "prompt on stdin and in $MOOTERM_PROMPT; model in $MOOTERM_MODEL")
+}
+
+@Test func customCommandFailuresAreReadable() async {
+    let missing = await CustomCommandTranslator(command: "definitely-not-a-real-tool-xyz -p hi").translate(sampleRequest())
+    guard case .failure(let failure) = missing else { Issue.record("expected failure"); return }
+    #expect(failure.message.contains("definitely-not-a-real-tool-xyz"))
+    let silent = await CustomCommandTranslator(command: "echo 'LLM not set' >&2; exit 1").translate(sampleRequest())
+    guard case .failure(let other) = silent else { Issue.record("expected failure"); return }
+    #expect(other.message.contains("LLM not set"))
+    let empty = await CustomCommandTranslator(command: "  ").translate(sampleRequest())
+    guard case .failure(let none) = empty else { Issue.record("expected failure"); return }
+    #expect(none.message.contains("no command"))
+}
+
+@Test func localServersNeedNoKey() {
+    let ollama = CustomAssistant.presets.first { $0.label.hasPrefix("Ollama") }!.make()
+    #expect(ollama.apiKeyVariable.isEmpty)
+    let client = ollama.makeTranslator() as? ChatCompletionsClient
+    #expect(client?.requiresKey == false)
+    let kimi = CustomAssistant.presets[0].make().makeTranslator() as? ChatCompletionsClient
+    #expect(kimi?.requiresKey == true)
+}
+
+@Test(.enabled(if: liveEnabled("opencode")))
+func liveOpencodePresetTranslatesARequest() async {
+    let preset = CustomAssistant.presets.first { $0.label == "opencode" }!.make()
+    expectLiveReply("opencode", await preset.makeTranslator().translate(liveRequest(model: "")))
 }

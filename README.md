@@ -1,3 +1,12 @@
+<p align="center">
+  <img src="Resources/mooterm_logo.png" alt="mooTerm logo: a cow with terminal prompts on its nose" width="200">
+</p>
+
+<h1 align="center">mooTerm</h1>
+
+<p align="center"><b>A native macOS terminal with split panes, broadcast groups, and AI command panels.</b><br>
+Moo — like the cow.</p>
+
 # mooTerm — macOS native port of Terminator
 
 A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
@@ -38,7 +47,7 @@ at build time.
 | Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
 | Save layout | ⇧⌘S |
 | Settings (scrollback lines, font, theme, dimming, Claude model) | ⌘, |
-| Claude / Codex / DeepSeek / MiniMax panel | ⌃⌘1 / ⌃⌘2 / ⌃⌘3 / ⌃⌘4 (Claude also ⇧⌘A) |
+| Assistant panels in bar order (Claude, Codex, DeepSeek, MiniMax, then custom) | ⌃⌘1 … ⌃⌘9 (Claude also ⇧⌘A) |
 | Fill the tab with a pane / restore | double-click the pane header (or ⇧⌘X) |
 | Zoom the window | double-click empty tab-bar space |
 
@@ -78,6 +87,20 @@ pane, and keeps its own conversation:
 | Codex | Codex CLI (`codex exec`, read-only sandbox) — slower: it may look around first | `codex login` |
 | DeepSeek | DeepSeek API directly (fast) | `DEEPSEEK_API_KEY` in your shell profile, or paste a key in Settings |
 | MiniMax | MiniMax API directly (China or Global endpoint) | A MiniMax platform API key in Settings, or `MINIMAX_API_KEY` |
+
+**Custom assistants** add a button for anything else (Settings → Custom, or
+the **+** under the assistant buttons):
+
+- **OpenAI-compatible API** — any `/chat/completions` endpoint. Presets for
+  Kimi (Moonshot), Qwen (DashScope), OpenRouter, and Ollama (local, no key).
+  Set the base URL, model, and a key (pasted, or read from a variable such as
+  `MOONSHOT_API_KEY`).
+- **Command-line tool** — any command that prints an answer. Presets for
+  Qwen Code (`qwen -p`), Kimi CLI (`kimi --quiet -p`), Gemini CLI
+  (`gemini -p`), and opencode (`opencode run`). The prompt arrives on stdin and
+  in `$MOOTERM_PROMPT`; mooTerm finds the JSON answer in whatever the tool
+  prints (or takes a fenced code block as the command).
+- **Test** in the editor sends a sample request and shows the answer and time.
 
 CLIs run through your login shell by name, so your aliases apply. Models,
 endpoints, and keys are in Settings → Assistants. Keys pasted there are saved
@@ -139,6 +162,7 @@ Sources/mooterm/
 ├── CommandAssistant.swift   Request → command proposals, risk checks, running
 ├── ProxySettings.swift      System/env/custom proxy → http_proxy variables
 ├── AssistantProvider.swift  Claude/Codex/DeepSeek/MiniMax metadata; API key store
+├── CustomAssistants.swift   User-defined API/CLI assistants, presets, descriptors
 ├── AssistantBackends.swift  CLI runner (login shell), Claude, Codex, chat-completions API
 ├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
 ├── CloseConfirmation.swift  "program still running" prompts

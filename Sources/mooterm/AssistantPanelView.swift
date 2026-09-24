@@ -11,8 +11,9 @@ extension UserDefaults {
 /// NemoMac's Claude sidebar, but the model only *proposes* commands — mooTerm
 /// types them into your shell when you accept.
 struct AssistantPanelView: View {
-    let provider: AssistantProvider
+    let descriptor: AssistantDescriptor
     @ObservedObject var assistant: CommandAssistant
+    @EnvironmentObject var customStore: CustomAssistantStore
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var preferences: TerminalPreferences
     @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
@@ -45,9 +46,13 @@ struct AssistantPanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: provider.systemImage).foregroundStyle(provider.tint)
-            Text(provider.title).font(.headline)
-            let model = preferences.model(for: provider)
+            if let symbol = descriptor.systemImage, NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil {
+                Image(systemName: symbol).foregroundStyle(descriptor.tint)
+            } else {
+                Text(descriptor.letter).font(.headline.weight(.bold)).foregroundStyle(descriptor.tint)
+            }
+            Text(descriptor.title).font(.headline).lineLimit(1)
+            let model = descriptor.modelLabel
             if !model.isEmpty {
                 Text(model)
                     .font(.caption2)
@@ -83,7 +88,7 @@ struct AssistantPanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if assistant.entries.isEmpty && !assistant.isThinking {
-                        EmptyStateView(providerName: provider.title) { example in
+                        EmptyStateView(providerName: descriptor.title) { example in
                             input = example
                             send()
                         }
@@ -92,7 +97,7 @@ struct AssistantPanelView: View {
                         entryView(entry).id(entry.id)
                     }
                     if assistant.isThinking {
-                        ThinkingRow(providerName: provider.title, since: assistant.thinkingSince, onCancel: assistant.cancel)
+                        ThinkingRow(providerName: descriptor.title, since: assistant.thinkingSince, onCancel: assistant.cancel)
                             .id("thinking")
                     }
                 }
@@ -176,22 +181,13 @@ struct AssistantPanelView: View {
         guard !text.isEmpty, !assistant.isThinking else { return }
         input = ""
         let context = TerminalContext.of(targetPane, broadcastPaneCount: broadcastCount)
-        let provider = self.provider
-        var options = AssistantOptions(model: preferences.model(for: provider))
-        options.environment = preferences.cliEnvironment
-        options.apiProxy = preferences.apiProxy
-        options.baseURL = preferences.baseURL(for: provider)
-        if provider.usesAPIKey { options.apiKey = Self.keyResolver(for: provider) }
+        let options = assistantOptions(for: descriptor.item, preferences: preferences, store: customStore)
         Task {
             if let autoRun = await assistant.submit(text, context: context, options: options),
                let command = autoRun.command {
                 run(autoRun, command)
             }
         }
-    }
-
-    nonisolated private static func keyResolver(for provider: AssistantProvider) -> @Sendable () -> String? {
-        { APIKeyStore.resolve(for: provider) }
     }
 
     private var broadcastCount: Int {

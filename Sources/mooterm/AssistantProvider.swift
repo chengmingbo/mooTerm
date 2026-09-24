@@ -96,17 +96,26 @@ enum APIKeyStore {
     }
 
     static func savedKey(for provider: AssistantProvider, file: URL = fileURL) -> String? {
-        guard let data = try? Data(contentsOf: file),
-              let keys = try? JSONDecoder().decode([String: String].self, from: data),
-              let key = keys[provider.rawValue], !key.isEmpty else { return nil }
-        return key
+        savedKey(account: provider.rawValue, file: file)
     }
 
     static func save(_ key: String?, for provider: AssistantProvider, file: URL = fileURL) {
+        save(key, account: provider.rawValue, file: file)
+    }
+
+    /// Keys are stored per account: a provider id, or `custom.<uuid>`.
+    static func savedKey(account: String, file: URL = fileURL) -> String? {
+        guard let data = try? Data(contentsOf: file),
+              let keys = try? JSONDecoder().decode([String: String].self, from: data),
+              let key = keys[account], !key.isEmpty else { return nil }
+        return key
+    }
+
+    static func save(_ key: String?, account: String, file: URL = fileURL) {
         var keys = (try? Data(contentsOf: file))
             .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        keys[provider.rawValue] = trimmed.isEmpty ? nil : trimmed
+        keys[account] = trimmed.isEmpty ? nil : trimmed
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
@@ -129,8 +138,12 @@ enum APIKeyStore {
 
     /// Full lookup, including the login shell. Blocking; call off the main thread.
     static func resolve(for provider: AssistantProvider) -> String? {
-        if let saved = savedKey(for: provider) { return saved }
-        guard let variable = provider.apiKeyVariable else { return nil }
+        resolve(account: provider.rawValue, variable: provider.apiKeyVariable)
+    }
+
+    static func resolve(account: String, variable: String?) -> String? {
+        if let saved = savedKey(account: account) { return saved }
+        guard let variable, !variable.isEmpty else { return nil }
         if let value = ProcessInfo.processInfo.environment[variable], !value.isEmpty { return value }
         return loginShellVariable(variable)
     }

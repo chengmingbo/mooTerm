@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 
 // SwiftPM-built executables don't synthesise an NSApplicationMain symbol, so
@@ -34,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     weak var themeMenu: NSMenu?
     weak var layoutsMenu: NSMenu?
     weak var windowMenu: NSMenu?
+    weak var assistantsMenu: NSMenu?
+    var customStore: CustomAssistantStore!
+    private var customStoreObservation: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         RenameMigration.run()
@@ -53,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowStore = WindowStore()
         preferences = TerminalPreferences()
         assistantHub = AssistantHub()
+        customStore = CustomAssistantStore()
 
         let contentView = ContentView()
             .environmentObject(sessionStore)
@@ -62,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             .environmentObject(windowStore)
             .environmentObject(preferences)
             .environmentObject(assistantHub)
+            .environmentObject(customStore)
             .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
 
@@ -86,6 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         windowStore.apply(to: win)
 
         installMenu()
+        customStoreObservation = customStore.$assistants.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.rebuildAssistantsMenu() }
+        }
 
         // Clicking into a terminal makes its pane the active one, so menu
         // commands (split, close, find) target what the user is looking at.
@@ -221,22 +230,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let prevPane = NSMenuItem(title: "Previous Pane", action: #selector(previousPaneAction), keyEquivalent: "[")
         prevPane.target = self
         viewMenu.addItem(prevPane)
-        // Activity-bar panels: ⌃⌘1…⌃⌘4 in bar order; Claude also keeps ⇧⌘A.
-        for (index, item) in SidebarItem.allCases.enumerated() {
-            let menuItem = NSMenuItem(title: "\(item.title) Panel", action: #selector(toggleSidebarAction(_:)),
-                                      keyEquivalent: "\(index + 1)")
-            menuItem.keyEquivalentModifierMask = [.command, .control]
-            menuItem.target = self
-            menuItem.representedObject = item.rawValue
-            viewMenu.addItem(menuItem)
-        }
-        let claudeAlias = NSMenuItem(title: "Claude Panel", action: #selector(toggleSidebarAction(_:)), keyEquivalent: "a")
-        claudeAlias.keyEquivalentModifierMask = [.command, .shift]
-        claudeAlias.target = self
-        claudeAlias.representedObject = SidebarItem.claude.rawValue
-        claudeAlias.isHidden = true
-        claudeAlias.allowsKeyEquivalentWhenHidden = true
-        viewMenu.addItem(claudeAlias)
+        // Activity-bar panels live in a submenu rebuilt when custom
+        // assistants are added or removed.
+        let assistantsItem = NSMenuItem(title: "Assistants", action: nil, keyEquivalent: "")
+        let assistantsMenu = NSMenu(title: "Assistants")
+        assistantsItem.submenu = assistantsMenu
+        viewMenu.addItem(assistantsItem)
+        self.assistantsMenu = assistantsMenu
+        rebuildAssistantsMenu()
         let dim = NSMenuItem(title: "Dim Inactive Panes", action: #selector(toggleDimAction(_:)), keyEquivalent: "")
         dim.target = self
         dim.state = Self.dimInactivePanes ? .on : .off
@@ -414,9 +415,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    /// ⌃⌘1…⌃⌘9 in activity-bar order; Claude also keeps ⇧⌘A.
+    private func rebuildAssistantsMenu() {
+        guard let menu = assistantsMenu else { return }
+        menu.removeAllItems()
+        for (index, descriptor) in AssistantDescriptor.all(store: customStore, preferences: preferences).enumerated() {
+            let item = NSMenuItem(title: descriptor.title, action: #selector(toggleSidebarAction(_:)),
+                                  keyEquivalent: index < 9 ? "\(index + 1)" : "")
+            item.keyEquivalentModifierMask = [.command, .control]
+            item.target = self
+            item.representedObject = descriptor.item.rawValue
+            menu.addItem(item)
+        }
+        let claudeAlias = NSMenuItem(title: "Claude", action: #selector(toggleSidebarAction(_:)), keyEquivalent: "a")
+        claudeAlias.keyEquivalentModifierMask = [.command, .shift]
+        claudeAlias.target = self
+        claudeAlias.representedObject = SidebarItem.claude.rawValue
+        claudeAlias.isHidden = true
+        claudeAlias.allowsKeyEquivalentWhenHidden = true
+        menu.addItem(claudeAlias)
+        menu.addItem(.separator())
+        let manage = NSMenuItem(title: "Custom Assistants…", action: #selector(showCustomAssistantsAction), keyEquivalent: "")
+        manage.target = self
+        menu.addItem(manage)
+    }
+
+    @objc func showCustomAssistantsAction() {
+        UserDefaults.standard.set(SettingsView.Tab.custom.rawValue, forKey: SettingsView.focusSectionKey)
+        showSettingsAction()
+    }
+
     @objc func showSettingsAction() {
         if settingsWindow == nil {
             let view = SettingsView()
+                .environmentObject(customStore)
                 .environmentObject(preferences)
                 .environmentObject(fontSizeStore)
                 .environmentObject(schemeStore)
