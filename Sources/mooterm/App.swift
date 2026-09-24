@@ -528,7 +528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Fallback shown by About when running outside the .app (`swift run`).
     /// Keep in sync with Packaging/mooTerm.app/Contents/Info.plist.
-    static let version = "0.3.0"
+    static let version = "0.3.1"
     @objc func broadcastAction() { sessionStore?.activeTab?.toggleBroadcast() }
 
     @objc func zoomAction() {
