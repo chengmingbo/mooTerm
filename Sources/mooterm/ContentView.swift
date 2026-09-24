@@ -2,7 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var store: SessionStore
-    @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
+    /// This window's sidebar selection (each window has its own).
+    @EnvironmentObject var windowState: WindowState
     @AppStorage(UserDefaults.assistantWidthKey) private var assistantWidth: Double = 300
     @State private var dragStartWidth: Double?
 
@@ -10,7 +11,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             ActivityBar()
             Divider()
-            if let item = SidebarItem(rawValue: sidebarSelection) {
+            if let item = SidebarItem(rawValue: windowState.sidebarSelection) {
                 SidebarPanel(item: item)
                     .frame(width: assistantWidth)
                 panelDivider

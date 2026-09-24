@@ -13,11 +13,31 @@ final class SessionStore: ObservableObject {
         tabs.first(where: { $0.id == activeTabID })
     }
 
-    init() {
-        let first = TabSession()
+    /// Called when the last tab closes; the window closes itself. Without
+    /// it (e.g. in tests) a fresh tab replaces the last one.
+    var onBecameEmpty: (() -> Void)?
+
+    init(cwd: String? = nil) {
+        let first = TabSession(cwd: cwd)
         self.activeTabID = first.id
         self.tabs = [first]
         wire(first)
+    }
+
+    /// A store holding an existing tab (Move Tab to New Window).
+    init(adopting tab: TabSession) {
+        self.activeTabID = tab.id
+        self.tabs = [tab]
+        wire(tab)
+    }
+
+    /// Remove a tab without ending its shells, to move it to another window.
+    func detachTab(_ id: UUID) -> TabSession? {
+        guard tabs.count > 1, let idx = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        let tab = tabs.remove(at: idx)
+        tab.clearIndicators()
+        if activeTabID == id { setActive(tabs[min(idx, tabs.count - 1)].id) }
+        return tab
     }
 
     /// Open a tab in the active pane's directory (iTerm2's "reuse previous
@@ -32,7 +52,9 @@ final class SessionStore: ObservableObject {
         guard let idx = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[idx].terminate()
         tabs.remove(at: idx)
-        if tabs.isEmpty {
+        if tabs.isEmpty, let onBecameEmpty {
+            onBecameEmpty()
+        } else if tabs.isEmpty {
             let t = TabSession()
             tabs.append(t)
             activeTabID = t.id

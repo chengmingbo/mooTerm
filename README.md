@@ -43,6 +43,9 @@ at build time.
 
 | Action | Shortcut |
 |---|---|
+| New window (opens in the current directory) | ⌘N |
+| Close window | ⇧⌘W |
+| Move tab to a new window | Window → Move Tab to New Window |
 | New tab (opens in the current directory) | ⌘T |
 | Close tab | ⌘W |
 | Select tab 1–8 / last tab | ⌘1 … ⌘8 / ⌘9 |
@@ -87,8 +90,12 @@ running.
 Scrollback defaults to 10,000 lines per pane. Change it in Settings (⌘,),
 from 0 (off) to 1,000,000; open panes resize their history immediately.
 
-Shells belong to their panes, so splitting, zooming, and switching tabs never
-restart them. When a shell exits, its pane closes.
+Each window has its own tabs, panes, and sidebar panel; settings, themes,
+and assistant conversations are shared. The Window menu lists open windows.
+Closing a window's last tab closes the window.
+
+Shells belong to their panes, so splitting, zooming, switching tabs, and
+moving a tab to another window never restart them. When a shell exits, its pane closes.
 
 ## Assistant panels (Claude, Codex, DeepSeek, MiniMax)
 
@@ -166,7 +173,8 @@ bash Packaging/make-icns.sh      # regenerate the icon from Resources/mooterm_lo
 
 ```
 Sources/mooterm/
-├── App.swift                AppDelegate, menus, focus sync, quit confirmation
+├── App.swift                AppDelegate, menus, window list, quit confirmation
+├── WindowController.swift   One window: its tabs, sidebar state, title, close
 ├── ContentView.swift        Tab bar + recursive split tree with draggable dividers
 ├── TabSession.swift         One tab: split tree, active pane, navigation, broadcast
 ├── Split.swift              SplitDirection, PaneNavigation, SplitNode

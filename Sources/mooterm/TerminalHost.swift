@@ -29,8 +29,8 @@ struct TerminalHost: NSViewRepresentable {
         // SwiftUI may briefly keep several containers for one pane (e.g.
         // while zooming or closing a split) and update ones it is about to
         // remove; only the newest live one may hold the terminal.
-        guard pane.containers.newest === container else { return }
-        let host = attachTerminal(to: container)
+        guard pane.containers.newest === container,
+              let host = attachTerminal(to: container) else { return }
         // These setters no-op when the value is unchanged, so ordinary
         // SwiftUI updates stay cheap.
         host.applyScheme(scheme)
@@ -61,9 +61,9 @@ struct TerminalHost: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     @discardableResult
-    private func attachTerminal(to container: TerminalContainerView) -> TerminalHostView {
-        let host = pane.ensureHost(fontSize: fontSize, scheme: scheme, scrollback: scrollback,
-                                   environment: environment)
+    private func attachTerminal(to container: TerminalContainerView) -> TerminalHostView? {
+        guard let host = pane.ensureHost(fontSize: fontSize, scheme: scheme, scrollback: scrollback,
+                                         environment: environment) else { return nil }
         container.adopt(host.view)
         return host
     }

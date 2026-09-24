@@ -23,8 +23,18 @@ enum MooTermMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
-    var window: NSWindow?
-    var sessionStore: SessionStore!
+    /// Open windows, oldest first.
+    private(set) var windowControllers: [MooTermWindowController] = []
+    private var shared: SharedStores!
+
+    /// The window menu commands act on: the key window, else the most recent.
+    var activeController: MooTermWindowController? {
+        windowControllers.first { $0.window === NSApp.keyWindow }
+            ?? windowControllers.first { $0.window === NSApp.mainWindow }
+            ?? windowControllers.last
+    }
+    var window: NSWindow? { activeController?.window }
+    var sessionStore: SessionStore? { activeController?.sessionStore }
     var schemeStore: ColorSchemeStore!
     var fontSizeStore: FontSizeStore!
     var layoutStore: LayoutStore!
@@ -50,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             }
             UserDefaults.standard.removeObject(forKey: "mooTerm.assistant.visible")
         }
-        sessionStore = SessionStore()
         schemeStore = ColorSchemeStore()
         fontSizeStore = FontSizeStore()
         layoutStore = LayoutStore()
@@ -58,55 +67,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         preferences = TerminalPreferences()
         assistantHub = AssistantHub()
         customStore = CustomAssistantStore()
+        shared = SharedStores(schemeStore: schemeStore, fontSizeStore: fontSizeStore,
+                              layoutStore: layoutStore, windowStore: windowStore,
+                              preferences: preferences, assistantHub: assistantHub,
+                              customStore: customStore)
 
-        let contentView = ContentView()
-            .environmentObject(sessionStore)
-            .environmentObject(schemeStore)
-            .environmentObject(fontSizeStore)
-            .environmentObject(layoutStore)
-            .environmentObject(windowStore)
-            .environmentObject(preferences)
-            .environmentObject(assistantHub)
-            .environmentObject(customStore)
-            .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
-                   minHeight: 480, idealHeight: 600, maxHeight: .infinity)
-
-        let hosting = NSHostingController(rootView: contentView)
-        // Only let SwiftUI impose the minimum size. By default the window
-        // also tracks the content's ideal size (900×600), which snapped it
-        // back whenever it was zoomed — so double-clicking the title bar
-        // or tab bar did nothing.
-        hosting.sizingOptions = [.minSize]
-        let win = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        win.contentViewController = hosting
-        win.title = "mooTerm"
-        win.setContentSize(NSSize(width: 900, height: 600))
-        win.center()
-        win.makeKeyAndOrderFront(nil)
+        openWindow(SessionStore())
         NSApp.activate(ignoringOtherApps: true)
-        self.window = win
-
-        // Apply persisted window-level preferences before the user sees the
-        // window, so borders/always-on-top reflect the saved state.
-        windowStore.apply(to: win)
 
         installMenu()
         customStoreObservation = customStore.$assistants.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.rebuildAssistantsMenu() }
         }
 
-        // Clicking into a terminal makes its pane the active one, so menu
-        // commands (split, close, find) target what the user is looking at.
-        firstResponderObservation = win.observe(\.firstResponder, options: [.new]) { window, _ in
-            MainActor.assumeIsolated {
-                (window.firstResponder as? MooTermTerminalView)?.onBecomeFirstResponder?()
-            }
-        }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             // Local monitors run on the main thread.
             nonisolated(unsafe) let event = event
@@ -114,17 +87,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    private var firstResponderObservation: NSKeyValueObservation?
     private var keyMonitor: Any?
+
+    /// Show a new window for `store`, cascaded from the current one.
+    @discardableResult
+    func openWindow(_ store: SessionStore, windowState: WindowState? = nil) -> MooTermWindowController {
+        let previous = activeController?.window
+        let controller = MooTermWindowController(sessionStore: store, shared: shared,
+                                                 windowState: windowState ?? WindowState())
+        controller.onClose = { [weak self] closed in
+            self?.windowControllers.removeAll { $0 === closed }
+        }
+        windowControllers.append(controller)
+        controller.show(cascadingFrom: previous)
+        return controller
+    }
 
     /// Quitting kills every shell, so confirm when programs are running.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        CloseConfirmation.confirm(closing: "mooTerm", running: sessionStore.runningProcessNames)
-            ? .terminateNow : .terminateCancel
+        let running = windowControllers.flatMap(\.sessionStore.runningProcessNames)
+        return CloseConfirmation.confirm(closing: "mooTerm", running: running) ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        sessionStore.tabs.forEach { $0.terminate() }
+        windowControllers.forEach { $0.sessionStore.tabs.forEach { $0.terminate() } }
+    }
+
+    /// Clicking the Dock icon with every window closed opens a new one.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows && windowControllers.isEmpty { openWindow(SessionStore()) }
+        return true
     }
 
     private func installMenu() {
@@ -150,12 +142,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
         fileItem.submenu = fileMenu
+        let newWindow = NSMenuItem(title: "New Window", action: #selector(newWindowAction), keyEquivalent: "n")
+        newWindow.target = self
+        fileMenu.addItem(newWindow)
         let newTab = NSMenuItem(title: "New Tab", action: #selector(newTabAction), keyEquivalent: "t")
         newTab.target = self
         fileMenu.addItem(newTab)
         let closeTab = NSMenuItem(title: "Close Tab", action: #selector(closeTabAction), keyEquivalent: "w")
         closeTab.target = self
         fileMenu.addItem(closeTab)
+        let closeWindow = NSMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        closeWindow.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(closeWindow)
         fileMenu.addItem(NSMenuItem.separator())
         let clear = NSMenuItem(title: "Clear Buffer", action: #selector(clearBufferAction), keyEquivalent: "k")
         clear.target = self
@@ -347,6 +345,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         aot.state = windowStore.alwaysOnTop ? .on : .off
         windowMenu.addItem(aot)
         windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
+        windowMenu.addItem(NSMenuItem.separator())
+        let moveTab = NSMenuItem(title: "Move Tab to New Window", action: #selector(moveTabToNewWindowAction), keyEquivalent: "")
+        moveTab.target = self
+        windowMenu.addItem(moveTab)
+        windowMenu.addItem(NSMenuItem.separator())
         let nextTab = NSMenuItem(title: "Show Next Tab", action: #selector(nextTabAction), keyEquivalent: "]")
         nextTab.keyEquivalentModifierMask = [.command, .shift]
         nextTab.target = self
@@ -362,28 +367,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.tag = number
             windowMenu.addItem(item)
         }
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(NSMenuItem(title: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: ""))
         self.windowMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+        // AppKit appends the list of open windows to this menu.
+        NSApp.windowsMenu = windowMenu
     }
 
     // MARK: - Menu actions
 
-    @objc func newTabAction() { sessionStore.newTab() }
-    @objc func closeTabAction() { sessionStore.requestCloseTab() }
-    @objc func splitHAction() { sessionStore.activeTab?.split(.horizontal) }
-    @objc func splitVAction() { sessionStore.activeTab?.split(.vertical) }
-    @objc func closePaneAction() { sessionStore.requestClosePane() }
-    @objc func clearBufferAction() { sessionStore.activeTab?.activePane?.host?.clearBuffer() }
+    /// ⌘N: a new window starting in the current pane's directory.
+    @objc func newWindowAction() {
+        openWindow(SessionStore(cwd: sessionStore?.activeTab?.activePane?.currentDirectory),
+                   windowState: WindowState(sidebarSelection: activeController?.windowState.sidebarSelection))
+    }
+
+    @objc func moveTabToNewWindowAction() {
+        guard let source = activeController, let id = source.sessionStore.activeTab?.id,
+              let tab = source.sessionStore.detachTab(id) else { return }
+        openWindow(SessionStore(adopting: tab))
+    }
+
+    @objc func newTabAction() { sessionStore?.newTab() }
+    @objc func closeTabAction() { sessionStore?.requestCloseTab() }
+    @objc func splitHAction() { sessionStore?.activeTab?.split(.horizontal) }
+    @objc func splitVAction() { sessionStore?.activeTab?.split(.vertical) }
+    @objc func closePaneAction() { sessionStore?.requestClosePane() }
+    @objc func clearBufferAction() { sessionStore?.activeTab?.activePane?.host?.clearBuffer() }
     @objc func selectPaneAction(_ sender: NSMenuItem) {
         guard let direction = sender.representedObject as? PaneNavigation else { return }
-        sessionStore.activeTab?.focusNeighbor(direction)
+        sessionStore?.activeTab?.focusNeighbor(direction)
     }
-    @objc func nextPaneAction() { sessionStore.activeTab?.cyclePane(by: 1) }
-    @objc func previousPaneAction() { sessionStore.activeTab?.cyclePane(by: -1) }
-    @objc func nextTabAction() { sessionStore.cycleTab(by: 1) }
-    @objc func previousTabAction() { sessionStore.cycleTab(by: -1) }
-    @objc func selectTabAction(_ sender: NSMenuItem) { sessionStore.selectTab(number: sender.tag) }
+    @objc func nextPaneAction() { sessionStore?.activeTab?.cyclePane(by: 1) }
+    @objc func previousPaneAction() { sessionStore?.activeTab?.cyclePane(by: -1) }
+    @objc func nextTabAction() { sessionStore?.cycleTab(by: 1) }
+    @objc func previousTabAction() { sessionStore?.cycleTab(by: -1) }
+    @objc func selectTabAction(_ sender: NSMenuItem) { sessionStore?.selectTab(number: sender.tag) }
 
     static var dimInactivePanes: Bool {
         UserDefaults.standard.object(forKey: UserDefaults.dimInactivePanesKey) as? Bool ?? false
@@ -402,7 +423,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.state = (item.representedObject as? String) == schemeStore.current.id ? .on : .off
         case #selector(toggleSidebarAction(_:)):
             let target = (item.representedObject as? String).flatMap(SidebarItem.init(rawValue:))
-            item.state = target != nil && UserDefaults.selectedSidebarItem == target ? .on : .off
+            item.state = target != nil && activeController?.windowState.selectedItem == target ? .on : .off
+        case #selector(moveTabToNewWindowAction):
+            return (sessionStore?.tabs.count ?? 0) > 1
         case #selector(toggleDimAction(_:)):
             item.state = Self.dimInactivePanes ? .on : .off
         default:
@@ -416,13 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// close it and return to the terminal.
     @objc func toggleSidebarAction(_ sender: NSMenuItem) {
         guard let item = (sender.representedObject as? String).flatMap(SidebarItem.init(rawValue:)) else { return }
-        let visible = UserDefaults.selectedSidebarItem == item
+        guard let state = activeController?.windowState else { return }
+        let visible = state.selectedItem == item
         let terminalFocused = window?.firstResponder is MooTermTerminalView
         if visible && terminalFocused {
             NotificationCenter.default.post(name: .mootermFocusAssistant, object: nil)
         } else {
-            UserDefaults.selectedSidebarItem = visible ? nil : item
-            if visible, let view = sessionStore.activeTab?.activePane?.host?.view {
+            state.selectedItem = visible ? nil : item
+            if visible, let view = sessionStore?.activeTab?.activePane?.host?.view {
                 window?.makeFirstResponder(view)
             }
         }
@@ -495,23 +519,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Fallback shown by About when running outside the .app (`swift run`).
     /// Keep in sync with Packaging/mooTerm.app/Contents/Info.plist.
     static let version = "0.2.2"
-    @objc func broadcastAction() { sessionStore.activeTab?.toggleBroadcast() }
+    @objc func broadcastAction() { sessionStore?.activeTab?.toggleBroadcast() }
 
     @objc func zoomAction() {
-        if let tab = sessionStore.activeTab, tab.zoomedPaneID != nil {
+        if let tab = sessionStore?.activeTab, tab.zoomedPaneID != nil {
             tab.unzoom()
         } else {
-            sessionStore.activeTab?.zoomActive(bumpFont: true)
+            sessionStore?.activeTab?.zoomActive(bumpFont: true)
         }
     }
     @objc func maximiseAction() {
-        if let tab = sessionStore.activeTab, tab.zoomedPaneID != nil {
+        if let tab = sessionStore?.activeTab, tab.zoomedPaneID != nil {
             tab.unzoom()
         } else {
-            sessionStore.activeTab?.zoomActive(bumpFont: false)
+            sessionStore?.activeTab?.zoomActive(bumpFont: false)
         }
     }
-    @objc func unzoomAction() { sessionStore.activeTab?.unzoom() }
+    @objc func unzoomAction() { sessionStore?.activeTab?.unzoom() }
 
     @objc func selectScheme(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,
@@ -526,28 +550,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// ⌥⌘0: back to the standard size everywhere, dropping per-pane sizes.
     @objc func resetFontAllAction() {
         fontSizeStore.reset()
-        sessionStore.tabs.flatMap(\.panes).forEach { $0.fontSizeOffset = 0 }
+        sessionStore?.tabs.flatMap(\.panes).forEach { $0.fontSizeOffset = 0 }
     }
 
     /// ⌘= / ⌘- / ⌘0: the active pane only.
     @objc func biggerFontAction() {
-        sessionStore.activeTab?.activePane?.adjustFontSize(by: FontSizeStore.step, globalSize: fontSizeStore.size)
+        sessionStore?.activeTab?.activePane?.adjustFontSize(by: FontSizeStore.step, globalSize: fontSizeStore.size)
     }
     @objc func smallerFontAction() {
-        sessionStore.activeTab?.activePane?.adjustFontSize(by: -FontSizeStore.step, globalSize: fontSizeStore.size)
+        sessionStore?.activeTab?.activePane?.adjustFontSize(by: -FontSizeStore.step, globalSize: fontSizeStore.size)
     }
     @objc func resetFontAction() {
-        sessionStore.activeTab?.activePane?.fontSizeOffset = 0
+        sessionStore?.activeTab?.activePane?.fontSizeOffset = 0
     }
 
     @objc func toggleBordersAction() {
         windowStore.borders.toggle()
-        if let window { windowStore.apply(to: window) }
+        windowControllers.forEach { windowStore.apply(to: $0.window) }
         refreshWindowMenuCheckmarks()
     }
     @objc func toggleAlwaysOnTopAction() {
         windowStore.alwaysOnTop.toggle()
-        if let window { windowStore.apply(to: window) }
+        windowControllers.forEach { windowStore.apply(to: $0.window) }
         refreshWindowMenuCheckmarks()
     }
 
@@ -555,8 +579,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func saveLayoutAction() {
         promptForLayoutName { [weak self] name in
-            guard let self, let name, !name.isEmpty else { return }
-            let layout = LayoutStore.snapshot(of: self.sessionStore, name: name)
+            guard let self, let name, !name.isEmpty, let store = self.sessionStore else { return }
+            let layout = LayoutStore.snapshot(of: store, name: name)
             self.layoutStore.save(layout)
             self.rebuildLayoutsMenu()
         }
@@ -564,8 +588,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func restoreLayoutAction(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? UUID,
-              let layout = layoutStore.layouts.first(where: { $0.id == id }) else { return }
-        layoutStore.restore(layout, into: sessionStore)
+              let layout = layoutStore.layouts.first(where: { $0.id == id }),
+              let store = sessionStore else { return }
+        layoutStore.restore(layout, into: store)
     }
 
     @objc func deleteLayoutAction(_ sender: NSMenuItem) {

@@ -49,7 +49,8 @@ extension UserDefaults {
 /// VS Code–style activity bar: a thin column of tool buttons on the far
 /// left. Clicking a button opens its panel; clicking it again closes it.
 struct ActivityBar: View {
-    @AppStorage(UserDefaults.sidebarSelectionKey) private var selection = ""
+    /// This window's sidebar selection (each window has its own).
+    @EnvironmentObject var windowState: WindowState
     @EnvironmentObject var customStore: CustomAssistantStore
     @EnvironmentObject var preferences: TerminalPreferences
 
@@ -60,8 +61,8 @@ struct ActivityBar: View {
             let items = AssistantDescriptor.all(store: customStore, preferences: preferences)
             ForEach(Array(items.enumerated()), id: \.element.id) { index, descriptor in
                 ActivityBarButton(descriptor: descriptor, index: index,
-                                  isSelected: selection == descriptor.item.rawValue) {
-                    selection = selection == descriptor.item.rawValue ? "" : descriptor.item.rawValue
+                                  isSelected: windowState.sidebarSelection == descriptor.item.rawValue) {
+                    windowState.sidebarSelection = windowState.sidebarSelection == descriptor.item.rawValue ? "" : descriptor.item.rawValue
                 }
             }
             Button {

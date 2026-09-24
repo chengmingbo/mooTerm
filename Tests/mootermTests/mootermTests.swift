@@ -176,9 +176,11 @@ import SwiftUI
     let pane = Pane(cwd: NSTemporaryDirectory())
     let first = pane.ensureHost(fontSize: 13, scheme: .terminator, scrollback: 1_000)
     let second = pane.ensureHost(fontSize: 13, scheme: .terminator, scrollback: 1_000)
-    #expect(first === second)
+    #expect(first != nil && first === second)
     pane.terminate()
     #expect(pane.host == nil)
+    // Regression: a redraw after closing started a fresh, orphaned shell.
+    #expect(pane.ensureHost(fontSize: 13, scheme: .terminator, scrollback: 1_000) == nil)
 }
 
 @MainActor
@@ -1055,33 +1057,27 @@ func closingASplitKeepsTheOtherTerminalVisible(direction: SplitDirection, closeO
     #expect([a, c].map { $0.host?.view } == [views[0], views[2]], "same terminals (and shells), not new ones")
 }
 
-/// The app's real window: ContentView with every store, sized like AppDelegate does.
+@MainActor
+private func sharedStores(_ defaults: UserDefaults) -> SharedStores {
+    SharedStores(schemeStore: ColorSchemeStore(defaults: defaults), fontSizeStore: FontSizeStore(defaults: defaults),
+                 layoutStore: LayoutStore(), windowStore: WindowStore(defaults: defaults),
+                 preferences: TerminalPreferences(defaults: defaults), assistantHub: AssistantHub(defaults: defaults),
+                 customStore: CustomAssistantStore(defaults: defaults))
+}
+
+/// The app's real window, built by the same controller the app uses.
 @MainActor
 private func makeAppWindow(defaults: UserDefaults, store: SessionStore) -> NSWindow {
-    let contentView = ContentView()
-        .environmentObject(store)
-        .environmentObject(ColorSchemeStore(defaults: defaults))
-        .environmentObject(FontSizeStore(defaults: defaults))
-        .environmentObject(LayoutStore())
-        .environmentObject(WindowStore(defaults: defaults))
-        .environmentObject(TerminalPreferences(defaults: defaults))
-        .environmentObject(AssistantHub(defaults: defaults))
-        .environmentObject(CustomAssistantStore(defaults: defaults))
-        .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
-               minHeight: 480, idealHeight: 600, maxHeight: .infinity)
-    let hosting = NSHostingController(rootView: contentView)
-    hosting.sizingOptions = [.minSize]  // as AppDelegate does
-    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 600),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                          backing: .buffered, defer: false)
-    window.isReleasedWhenClosed = false
-    window.contentViewController = hosting
-    window.setContentSize(NSSize(width: 900, height: 600))
-    window.center()
-    window.makeKeyAndOrderFront(nil)
+    let controller = MooTermWindowController(sessionStore: store, shared: sharedStores(defaults),
+                                             windowState: WindowState(sidebarSelection: ""))
+    liveControllers.append(controller)
+    controller.show(cascadingFrom: nil)
     RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-    return window
+    return controller.window
 }
+
+/// Keeps test window controllers alive while their windows are open.
+@MainActor private var liveControllers: [MooTermWindowController] = []
 
 @MainActor
 @Test func realAppWindowZoomsFromTheTabBar() throws {
@@ -1170,4 +1166,71 @@ private func findView<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
     LayoutStore().restore(saved, into: fresh)
     #expect(fresh.activeTab!.panes.map(\.fontSizeOffset).sorted() == [0, 4])
     fresh.tabs.forEach { $0.terminate() }
+}
+
+// MARK: - Multiple windows
+
+@MainActor
+private func openTestWindow(_ store: SessionStore, _ defaults: UserDefaults, sidebar: String = "") -> MooTermWindowController {
+    let controller = MooTermWindowController(sessionStore: store, shared: sharedStores(defaults),
+                                             windowState: WindowState(sidebarSelection: sidebar))
+    liveControllers.append(controller)
+    controller.show(cascadingFrom: nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    return controller
+}
+
+@MainActor
+@Test func windowsHaveSeparateTabsAndSidebars() throws {
+    try #require(NSScreen.main != nil)
+    let defaults = UserDefaults(suiteName: "mooterm-win-\(UUID().uuidString)")!
+    let one = openTestWindow(SessionStore(cwd: "/tmp"), defaults, sidebar: "claude")
+    let two = openTestWindow(SessionStore(cwd: "/usr"), defaults)
+    defer { one.window.close(); two.window.close() }
+    one.sessionStore.newTab()
+    #expect(one.sessionStore.tabs.count == 2 && two.sessionStore.tabs.count == 1)
+    #expect(two.sessionStore.activeTab?.activePane?.cwd == "/usr", "new window starts in the given directory")
+    #expect(one.windowState.selectedItem == .claude && two.windowState.selectedItem == nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    #expect(two.window.title == "usr — mooTerm", "title follows the active tab")
+}
+
+@MainActor
+@Test func closingTheLastTabClosesTheWindowAndEndsShells() throws {
+    try #require(NSScreen.main != nil)
+    let defaults = UserDefaults(suiteName: "mooterm-win-\(UUID().uuidString)")!
+    let controller = openTestWindow(SessionStore(), defaults)
+    nonisolated(unsafe) var closed = false
+    controller.onClose = { _ in closed = true }
+    let pane = controller.sessionStore.activeTab!.panes[0]
+    #expect(pane.host != nil, "window shows a live terminal")
+    controller.sessionStore.closeActiveTab()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    #expect(closed, "window closed with its last tab")
+    #expect(!controller.window.isVisible)
+    #expect(pane.host == nil, "shell ended")
+}
+
+@MainActor
+@Test func movingATabToANewWindowKeepsItsShells() throws {
+    try #require(NSScreen.main != nil)
+    let defaults = UserDefaults(suiteName: "mooterm-win-\(UUID().uuidString)")!
+    let source = openTestWindow(SessionStore(), defaults)
+    source.sessionStore.newTab()
+    let moving = source.sessionStore.activeTab!
+    moving.split(.vertical)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    let terminals = moving.panes.map { $0.host?.view }
+    #expect(terminals.allSatisfy { $0 != nil })
+
+    let tab = try #require(source.sessionStore.detachTab(moving.id))
+    let target = openTestWindow(SessionStore(adopting: tab), defaults)
+    defer { source.window.close(); target.window.close() }
+    #expect(source.sessionStore.tabs.count == 1)
+    #expect(target.sessionStore.activeTab === moving)
+    #expect(moving.panes.map { $0.host?.view } == terminals, "same terminals, shells still running")
+    for pane in moving.panes {
+        #expect(pane.host?.view.window === target.window, "terminal now shows in the new window")
+    }
+    #expect(source.sessionStore.detachTab(source.sessionStore.activeTabID) == nil, "a window's only tab can't be moved out")
 }

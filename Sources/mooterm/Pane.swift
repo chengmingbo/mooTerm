@@ -50,10 +50,15 @@ final class Pane: ObservableObject, Identifiable {
         self.cwd = cwd ?? (home.isEmpty ? "/" : home)
     }
 
-    /// The pane's terminal, created and started on first use.
+    /// Set once the pane is closed. SwiftUI may still redraw it before
+    /// removing it, and that must not start a fresh (orphaned) shell.
+    private(set) var isClosed = false
+
+    /// The pane's terminal, created and started on first use; nil once closed.
     func ensureHost(fontSize: CGFloat, scheme: ColorScheme, scrollback: Int,
-                    environment: [String: String] = [:]) -> TerminalHostView {
+                    environment: [String: String] = [:]) -> TerminalHostView? {
         if let host { return host }
+        guard !isClosed else { return nil }
         let dir = URL(fileURLWithPath: cwd ?? NSHomeDirectory())
         let host = TerminalHostView(startingDirectory: dir)
         host.configureAppearance(fontSize: fontSize)
@@ -93,6 +98,7 @@ final class Pane: ObservableObject, Identifiable {
     }
 
     func terminate() {
+        isClosed = true
         onExit = nil
         host?.terminate()
         host = nil

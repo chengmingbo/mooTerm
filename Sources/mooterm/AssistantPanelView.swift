@@ -16,7 +16,8 @@ struct AssistantPanelView: View {
     @EnvironmentObject var customStore: CustomAssistantStore
     @EnvironmentObject var store: SessionStore
     @EnvironmentObject var preferences: TerminalPreferences
-    @AppStorage(UserDefaults.sidebarSelectionKey) private var sidebarSelection = ""
+    /// This window's sidebar selection (each window has its own).
+    @EnvironmentObject var windowState: WindowState
     @State private var input = ""
     @State private var focusComposer = 0
 
@@ -74,7 +75,7 @@ struct AssistantPanelView: View {
                 .buttonStyle(.borderless)
                 .disabled(assistant.isThinking || assistant.entries.isEmpty)
                 .help("Clear conversation")
-            Button { sidebarSelection = "" } label: { Image(systemName: "xmark") }
+            Button { windowState.sidebarSelection = "" } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless)
                 .help("Close panel")
         }
