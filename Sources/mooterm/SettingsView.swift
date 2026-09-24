@@ -12,6 +12,7 @@ struct SettingsView: View {
     @EnvironmentObject var fontSizeStore: FontSizeStore
     @EnvironmentObject var schemeStore: ColorSchemeStore
     @AppStorage(UserDefaults.dimInactivePanesKey) private var dimInactivePanes = false
+    @AppStorage(MooTermTerminalView.copyOnSelectKey) private var copyOnSelect = true
 
     private var proxyDescription: String {
         let using = preferences.effectiveProxy()?.summary
@@ -115,6 +116,8 @@ struct SettingsView: View {
                     ForEach(ColorScheme.all, id: \.id) { Text($0.displayName).tag($0.id) }
                 }
                 Toggle("Dim inactive panes", isOn: $dimInactivePanes)
+                Toggle("Copy text when selected", isOn: $copyOnSelect)
+                    .help("Like iTerm2: selecting text with the mouse copies it, no ⌘C needed")
             } header: {
                 Text("Appearance")
             }

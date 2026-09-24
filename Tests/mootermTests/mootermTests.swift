@@ -1234,3 +1234,46 @@ private func openTestWindow(_ store: SessionStore, _ defaults: UserDefaults, sid
     }
     #expect(source.sessionStore.detachTab(source.sessionStore.activeTabID) == nil, "a window's only tab can't be moved out")
 }
+
+// MARK: - Copy on select
+
+@MainActor
+@Test func selectingTextCopiesIt() throws {
+    try #require(NSScreen.main != nil)
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name("mooterm-test-\(UUID().uuidString)"))
+    MooTermTerminalView.selectionPasteboard = pasteboard
+    defer { MooTermTerminalView.selectionPasteboard = .general; pasteboard.releaseGlobally() }
+
+    let view = MooTermTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 300),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    window.makeKeyAndOrderFront(nil)
+    defer { window.close() }
+    view.feed(text: "hello copy on select\r\n")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+
+    func send(_ type: NSEvent.EventType, x: CGFloat, clicks: Int) {
+        let point = view.convert(NSPoint(x: x, y: view.frame.height - 8), to: nil)  // first row
+        let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1)!
+        window.sendEvent(event)
+    }
+
+    // Double-click a word: SwiftTerm selects it, releasing copies it.
+    send(.leftMouseDown, x: 60, clicks: 2)
+    send(.leftMouseUp, x: 60, clicks: 2)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    #expect(pasteboard.string(forType: .string) == "copy", "double-clicked word copied")
+
+    // Any finished selection is copied when the mouse is released.
+    view.selectAll()
+    send(.leftMouseUp, x: 200, clicks: 1)
+    #expect(pasteboard.string(forType: .string) == "hello copy on select")
+
+    // Turned off: nothing is copied.
+    pasteboard.clearContents()
+    #expect(!view.copySelectionIfEnabled(pasteboard: pasteboard, enabled: false))
+    #expect(pasteboard.string(forType: .string) == nil)
+}

@@ -28,6 +28,30 @@ final class MooTermTerminalView: LocalProcessTerminalView {
         onOutput?()
     }
 
+    /// iTerm2's "Copy to pasteboard on selection": finishing a mouse
+    /// selection (drag, double-click word, triple-click line) copies it.
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        copySelectionIfEnabled()
+    }
+
+    nonisolated static let copyOnSelectKey = "mooTerm.copyOnSelect"
+    nonisolated static var copyOnSelect: Bool {
+        UserDefaults.standard.object(forKey: copyOnSelectKey) as? Bool ?? true
+    }
+
+    /// Returns true when something was copied.
+    /// Where copy-on-select writes; tests swap in a private pasteboard.
+    nonisolated(unsafe) static var selectionPasteboard: NSPasteboard = .general
+
+    @discardableResult
+    func copySelectionIfEnabled(pasteboard: NSPasteboard = selectionPasteboard, enabled: Bool = copyOnSelect) -> Bool {
+        guard enabled, selectionActive, let text = getSelection(), !text.isEmpty else { return false }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        return true
+    }
+
     override func bell(source: Terminal) {
         super.bell(source: source)
         onBell?()

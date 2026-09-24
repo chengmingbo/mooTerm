@@ -174,6 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenu.addItem(NSMenuItem.separator())
+        let copyOnSelect = NSMenuItem(title: "Copy on Select", action: #selector(toggleCopyOnSelectAction), keyEquivalent: "")
+        copyOnSelect.target = self
+        editMenu.addItem(copyOnSelect)
+        editMenu.addItem(NSMenuItem.separator())
         // Find uses SwiftTerm's built-in find bar via the standard text
         // finder actions; nil target routes to the focused terminal.
         let finderItems: [(String, String, NSEvent.ModifierFlags, NSTextFinder.Action)] = [
@@ -409,6 +413,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     static var dimInactivePanes: Bool {
         UserDefaults.standard.object(forKey: UserDefaults.dimInactivePanesKey) as? Bool ?? false
     }
+    @objc func toggleCopyOnSelectAction() {
+        UserDefaults.standard.set(!MooTermTerminalView.copyOnSelect, forKey: MooTermTerminalView.copyOnSelectKey)
+    }
+
     @objc func toggleDimAction(_ sender: NSMenuItem) {
         let newValue = !Self.dimInactivePanes
         UserDefaults.standard.set(newValue, forKey: UserDefaults.dimInactivePanesKey)
@@ -426,6 +434,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             item.state = target != nil && activeController?.windowState.selectedItem == target ? .on : .off
         case #selector(moveTabToNewWindowAction):
             return (sessionStore?.tabs.count ?? 0) > 1
+        case #selector(toggleCopyOnSelectAction):
+            item.state = MooTermTerminalView.copyOnSelect ? .on : .off
         case #selector(toggleDimAction(_:)):
             item.state = Self.dimInactivePanes ? .on : .off
         default:
