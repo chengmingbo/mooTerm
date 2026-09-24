@@ -1,4 +1,4 @@
-# mterm MVP TODO
+# mTerm MVP TODO
 
 - [ ] Draggable split dividers (currently fixed 50/50)
 - [ ] Per-pane title with cwd (track OSC 7)

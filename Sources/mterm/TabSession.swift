@@ -3,9 +3,20 @@ import Combine
 
 /// One window-tab. Owns a tree of `SplitNode`s and a broadcast flag.
 final class TabSession: ObservableObject, Identifiable {
-    let id = UUID()
+    var id = UUID()
     @Published var root: SplitNode
     @Published var broadcast: Bool = false
+    /// User-supplied tab name. When nil, `title` falls back to the active
+    /// pane's cwd last path component.
+    @Published var customTitle: String?
+    /// Per-tab accent colour (used for the tab-bar dot indicator).
+    @Published var accent: AccentColor = .none
+    /// True when the user zoomed into a single pane via ⌘⇧Z or ⌘⇧X.
+    /// Stores the pane ID being zoomed so we can restore the layout on
+    /// unzoom (currently we only render the single pane — the original
+    /// tree is preserved in `root`, and we simply short-circuit at the
+    /// SwiftUI level).
+    @Published var zoomedPaneID: UUID?
 
     init() {
         self.root = SplitNode(pane: Pane())
@@ -40,6 +51,24 @@ final class TabSession: ObservableObject, Identifiable {
 
     func toggleBroadcast() { broadcast.toggle() }
     func setActive(paneID: UUID) { _activePaneID = paneID }
+
+    /// Zoom into the active pane (Terminator semantics: hide other panes,
+    /// also bump the font size by +2 until unzoom).
+    func zoomActive(bumpFont: Bool) {
+        guard let id = activePaneID else { return }
+        zoomedPaneID = id
+        _zoomBumpFont = bumpFont
+    }
+
+    /// Restore the original split tree view.
+    func unzoom() {
+        zoomedPaneID = nil
+        _zoomBumpFont = false
+    }
+
+    /// True only while zoomed in with a +2 font bump. Set by `zoomActive`.
+    var zoomBumpsFont: Bool { _zoomBumpFont }
+    private var _zoomBumpFont: Bool = false
 
     func broadcastTargets(for pane: Pane) -> [Pane] {
         guard broadcast else { return [pane] }

@@ -1,0 +1,205 @@
+import AppKit
+import SwiftTerm
+import Foundation
+
+/// Subclass of `LocalProcessTerminalView` that captures every byte that
+/// arrives from the child process into a `ScrollbackBuffer`. Required
+/// because `LocalProcessTerminalView.feed(byteArray:)` is `public` rather
+/// than `open` and `dataReceived(slice:)` is the only `open` hook we can
+/// safely intercept on the macOS build.
+@MainActor
+final class CapturingLocalProcessTerminalView: LocalProcessTerminalView {
+    let scrollback = ScrollbackBuffer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    convenience init(font: NSFont? = nil) {
+        self.init(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
+        if let font { self.font = font }
+    }
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        scrollback.append(bytes: slice)
+        super.dataReceived(slice: slice)
+    }
+}
+
+/// The single layer that knows about SwiftTerm.
+///
+/// Following the same separation as NemoMac's `TerminalHostView`, this class
+/// hides the terminal emulator from the rest of the app so the implementation
+/// can be swapped (for example, for libghostty) without changing the panel,
+/// settings, or session bookkeeping.
+@MainActor
+final class TerminalHostView: NSObject {
+    let view: CapturingLocalProcessTerminalView
+    private(set) var currentDirectory: URL
+    private var processDelegate: ProcessDelegate
+
+    /// Read-only access to the scrollback buffer; ⌘F in the pane queries
+    /// this for matches.
+    var scrollback: ScrollbackBuffer { view.scrollback }
+
+    var title: String = "" {
+        didSet { titleChanged?(title) }
+    }
+    var exited: Bool = false {
+        didSet { if exited { exitedChanged?(processDelegate.lastExitCode) } }
+    }
+    var currentDirectoryDidChange: ((URL) -> Void)?
+    var titleChanged: ((String) -> Void)?
+    var exitedChanged: ((Int32?) -> Void)?
+
+    init(startingDirectory: URL) {
+        self.currentDirectory = startingDirectory.standardizedFileURL
+        self.view = CapturingLocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 1000, height: 500))
+        self.processDelegate = ProcessDelegate()
+        super.init()
+        self.processDelegate.owner = self
+        self.view.processDelegate = processDelegate
+    }
+
+    private var appliedFontSize: CGFloat?
+    private var appliedSchemeID: String?
+
+    /// Set the terminal font size. SwiftTerm's `font` setter recomputes the
+    /// cell size, resizes the grid (sending SIGWINCH to the shell), and
+    /// schedules a redraw, so one assignment is all that's needed.
+    func configureAppearance(fontSize: CGFloat) {
+        guard fontSize != appliedFontSize else { return }
+        appliedFontSize = fontSize
+        view.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    }
+
+    /// Re-paint the terminal using the supplied scheme. Safe to call at any
+    /// time; SwiftTerm re-renders the next frame after the colours change.
+    func applyScheme(_ scheme: ColorScheme) {
+        guard scheme.id != appliedSchemeID else { return }
+        appliedSchemeID = scheme.id
+        view.nativeBackgroundColor = scheme.nsBackground()
+        view.nativeForegroundColor = scheme.nsForeground()
+        view.caretColor = scheme.nsCaret()
+        view.needsDisplay = true
+    }
+
+    func startShell(shell: String? = nil) {
+        let resolvedShell = shell ?? Self.resolveLoginShell()
+        view.startProcess(
+            executable: resolvedShell,
+            args: ["-l"],
+            environment: Self.shellEnvironment(shellPath: resolvedShell),
+            execName: URL(fileURLWithPath: resolvedShell).lastPathComponent
+        )
+    }
+
+    /// Start the shell in the given directory. Use this instead of
+    /// `startShell()` so the child zsh does not inherit the host process's
+    /// cwd, which on macOS `.app` bundles launched via `open` is `/`.
+    func startShell(in directory: URL) {
+        let resolvedShell = Self.resolveLoginShell()
+        view.startProcess(
+            executable: resolvedShell,
+            args: ["-l"],
+            environment: Self.shellEnvironment(shellPath: resolvedShell),
+            execName: URL(fileURLWithPath: resolvedShell).lastPathComponent,
+            currentDirectory: directory.path
+        )
+    }
+
+    /// True when the shell owns the PTY foreground process group and is safe to
+    /// receive injected text. Mirrors NemoMac's idle-detection so any caller that
+    /// later wants to send commands can guard against interrupting a child
+    /// program (editor, REPL, `top`, etc.).
+    var shellIsIdle: Bool {
+        guard view.process.running else { return false }
+        return tcgetpgrp(view.process.childfd) == view.process.shellPid
+    }
+
+    // MARK: - Shell environment
+
+    nonisolated static func resolveLoginShell() -> String {
+        let accountShell = getpwuid(getuid()).flatMap { entry -> String? in
+            guard let ptr = entry.pointee.pw_shell else { return nil }
+            return String(cString: ptr)
+        }
+        let candidate = accountShell ?? "/bin/zsh"
+        return FileManager.default.isExecutableFile(atPath: candidate) ? candidate : "/bin/zsh"
+    }
+
+    nonisolated static func shellEnvironment(shellPath: String) -> [String] {
+        var env = ProcessInfo.processInfo.environment
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        // macOS's /etc/zshrc uses TERM_PROGRAM to decide whether to install its
+        // OSC 7 working-directory hook. Setting it to "Apple_Terminal" matches
+        // NemoMac and lets us observe the shell's CWD via SwiftTerm.
+        env["TERM_PROGRAM"] = "Apple_Terminal"
+        env["TERM_PROGRAM_VERSION"] = "0.2.0"
+        env["SHELL"] = shellPath
+        env["HOME"] = NSHomeDirectory()
+        env["USER"] = NSUserName()
+        env["LOGNAME"] = NSUserName()
+        if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
+        if env["PATH"] == nil { env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin" }
+        return env.map { "\($0.key)=\($0.value)" }
+    }
+
+    // MARK: - Shell quoting (matches NemoMac)
+
+    /// POSIX-shell single-quote a value so it can safely appear inside a
+    /// double-quoted command body. Empty input returns the empty-quotes form
+    /// rather than the unquoted empty string.
+    nonisolated static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Build a `cd` command for the shell, prefixed with Ctrl-U to clear any
+    /// half-typed command before the directory change arrives.
+    nonisolated static func directoryChangeCommand(for url: URL) -> String {
+        "\u{15}cd -- \(shellQuote(url.standardizedFileURL.path))\n"
+    }
+
+    /// Parse the OSC 7 working-directory report that a well-configured shell
+    /// emits after every prompt. Returns `nil` for non-`file://` URLs so a
+    /// hostile prompt cannot redirect the terminal somewhere unexpected.
+    nonisolated static func reportedDirectory(from value: String?) -> URL? {
+        guard let value, let url = URL(string: value), url.isFileURL else { return nil }
+        return URL(fileURLWithPath: url.path, isDirectory: true).standardizedFileURL
+    }
+
+    // MARK: - Private delegate
+
+    @MainActor
+private final class ProcessDelegate: NSObject, @preconcurrency LocalProcessTerminalViewDelegate {
+        weak var owner: TerminalHostView?
+        var lastExitCode: Int32?
+
+        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+
+        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+            owner?.title = String(title.prefix(80))
+        }
+
+        func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+            guard let owner,
+                  let reported = TerminalHostView.reportedDirectory(from: directory),
+                  reported != owner.currentDirectory else { return }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: reported.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return }
+            owner.currentDirectory = reported
+            owner.currentDirectoryDidChange?(reported)
+        }
+
+        func processTerminated(source: TerminalView, exitCode: Int32?) {
+            lastExitCode = exitCode
+            owner?.exited = true
+        }
+    }
+}

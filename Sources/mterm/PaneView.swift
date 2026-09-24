@@ -4,188 +4,92 @@ import AppKit
 /// Notifications for menu items that originate inside SwiftUI views and need
 /// to mutate global state owned by AppDelegate (tabs, session).
 extension Notification.Name {
-    static let mtermNewTab = Notification.Name("mterm.newTab")
-    static let mtermCloseTab = Notification.Name("mterm.closeTab")
+    static let mtermNewTab = Notification.Name("mTerm.newTab")
+    static let mtermCloseTab = Notification.Name("mTerm.closeTab")
+    /// Posted by the menu / the find bar itself when the user wants to
+    /// open the find bar in the focused pane. UserInfo: ["paneID": UUID,
+    /// "term": String].
+    static let mtermFindInPane = Notification.Name("mTerm.findInPane")
 }
 
 /// Focus state — which pane currently owns keyboard input. Lives on the
 /// store so cross-pane navigation works.
 final class FocusStore: ObservableObject {
     @Published var focusedPaneID: UUID?
+    /// When non-nil, the focused pane should show its find bar pre-filled
+    /// with this string.
+    @Published var findRequest: FindRequest?
 }
 
-/// The scrollback + cursor + input line, all in one piece. Renders scrollback
-/// as plain green text, then the current prompt + cursor + active input as a
-/// single NSTextField pinned to the bottom of the area. macOS Terminal and
-/// iTerm2 use this layout.
-struct TerminalSurface: NSViewRepresentable {
-    @Binding var scrollback: String       // pane.content (read-only text)
-    @Binding var input: String            // current line being typed
-    var isFocused: Bool                   // this pane owns keyboard
-    var onSubmit: (String) -> Void
-    var onFocusRequest: () -> Void
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .noBorder
-        scroll.drawsBackground = false
-        scroll.backgroundColor = .black
-
-        // Scrollback text view — non-editable, just shows history.
-        let textView = NSTextView()
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.drawsBackground = false
-        textView.backgroundColor = .clear
-        textView.textColor = NSColor(calibratedRed: 0.12, green: 0.78, blue: 0.75, alpha: 1)
-        textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.autoresizingMask = [.width]
-        textView.isHorizontallyResizable = false
-        textView.isVerticallyResizable = true
-        textView.textContainer?.widthTracksTextView = true
-
-        scroll.documentView = textView
-        context.coordinator.scrollbackView = textView
-
-        // Input row — pinned to the bottom of the scrollable area as a custom
-        // subview so it stays in view while scrollback scrolls.
-        let input = CursorInputField()
-        input.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        input.textColor = NSColor(calibratedRed: 0.12, green: 0.78, blue: 0.75, alpha: 1)
-        input.backgroundColor = .clear
-        input.drawsBackground = false
-        input.isBezeled = false
-        input.isBordered = false
-        input.placeholderString = ""
-        input.target = context.coordinator
-        input.action = #selector(Coordinator.commit(_:))
-        input.delegate = context.coordinator
-        input.cell?.usesSingleLineMode = true
-        input.cell?.wraps = false
-        input.cell?.isScrollable = true
-        input.translatesAutoresizingMaskIntoConstraints = false
-        context.coordinator.inputField = input
-
-        scroll.addSubview(input)
-        NSLayoutConstraint.activate([
-            input.leadingAnchor.constraint(equalTo: scroll.leadingAnchor, constant: 12),
-            input.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: -12),
-            input.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -6),
-            input.heightAnchor.constraint(equalToConstant: 22),
-        ])
-        return scroll
-    }
-
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        let coord = context.coordinator
-        // Update scrollback text.
-        if let tv = coord.scrollbackView, tv.string != scrollback {
-            tv.string = scrollback
-            // Auto-scroll to bottom.
-            if let docView = scroll.documentView {
-                let bottom = NSPoint(x: 0, y: max(0, docView.frame.height - scroll.contentSize.height))
-                scroll.contentView.scroll(to: bottom)
-                scroll.reflectScrolledClipView(scroll.contentView)
-            }
-        }
-        // Update input field.
-        if let f = coord.inputField, f.stringValue != input {
-            f.stringValue = input
-        }
-        // Focus management: focus the input field when this pane becomes active.
-        if isFocused, let win = scroll.window {
-            if coord.lastFocused != scroll.window?.windowNumber {
-                coord.lastFocused = win.windowNumber
-                DispatchQueue.main.async { [weak scroll] in
-                    guard let scroll = scroll,
-                          let field = coord.inputField,
-                          let editor = field.currentEditor() ?? field.window?.fieldEditor(true, for: field)
-                    else { return }
-                    _ = editor
-                    scroll.window?.makeFirstResponder(field)
-                }
-            }
-        } else {
-            coord.lastFocused = nil
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: TerminalSurface
-        weak var scrollbackView: NSTextView?
-        weak var inputField: CursorInputField?
-        var lastFocused: Int?
-
-        init(_ parent: TerminalSurface) { self.parent = parent }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let tf = obj.object as? NSTextField else { return }
-            parent.input = tf.stringValue
-        }
-
-        @objc func commit(_ sender: NSTextField) {
-            parent.onSubmit(sender.stringValue)
-            sender.stringValue = ""
-            parent.input = ""
-        }
-    }
-}
-
-/// NSTextField with a block cursor (▌) appended to the visible text — mimics
-/// macOS Terminal's caret when the field is empty or the user is typing.
-final class CursorInputField: NSTextField {
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if let editor = self.currentEditor() {
-            editor.selectedRange = NSRange(location: editor.string.count, length: 0)
-        }
-        return ok
-    }
-
-    override func textDidEndEditing(_ notification: Notification) {
-        super.textDidEndEditing(notification)
-    }
+struct FindRequest: Equatable {
+    let paneID: UUID
+    let term: String
 }
 
 /// PaneView: renders a single terminal pane — header on top, terminal
-/// surface filling the rest, with split/close context menu.
+/// surface filling the rest, with split/close context menu. The terminal
+/// itself is a real SwiftTerm-backed shell via `TerminalHost`; everything
+/// visible inside the pane comes from the shell's PTY.
 struct PaneView: View {
     @ObservedObject var pane: Pane
     @ObservedObject var tab: TabSession
     @EnvironmentObject var focus: FocusStore
-    @State private var input: String = ""
+    @EnvironmentObject var schemeStore: ColorSchemeStore
+    @EnvironmentObject var fontSizeStore: FontSizeStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            TerminalSurface(
-                scrollback: Binding(
-                    get: { pane.content },
-                    set: { pane.content = $0 }),
-                input: $input,
-                isFocused: focus.focusedPaneID == pane.id,
-                onSubmit: { cmd in runCommand(cmd) },
-                onFocusRequest: { focus.focusedPaneID = pane.id }
-            )
-            .background(Color.black)
+            terminal
+            if findBarVisible {
+                FindBar(paneID: pane.id, isVisible: $findBarVisible)
+            }
         }
-        .background(Color.black)
-        .overlay(
-            Rectangle()
-                .stroke(Color.accentColor.opacity(0.7),
-                    lineWidth: tab.activePaneID == pane.id ? 2 : 0)
-        )
+        .background(Color(nsColor: schemeStore.current.nsBackground()))
+        .overlay(borderOverlay)
         .contextMenu { paneContextMenu }
         .onTapGesture {
             tab.setActive(paneID: pane.id)
             focus.focusedPaneID = pane.id
         }
         .onChange(of: focus.focusedPaneID) { newValue in
-            if newValue == pane.id { /* focus handled in updateNSView */ }
+            if newValue == pane.id { /* focus is handled by TerminalHost */ }
+        }
+        .onChange(of: focus.findRequest) { request in
+            if let request, request.paneID == pane.id {
+                findBarVisible = true
+            }
+        }
+    }
+
+    @State private var findBarVisible: Bool = false
+
+    private var terminal: some View {
+        let startDir: URL
+        if let cwd = pane.cwd {
+            startDir = URL(fileURLWithPath: cwd)
+        } else if let home = ProcessInfo.processInfo.environment["HOME"] {
+            startDir = URL(fileURLWithPath: home)
+        } else {
+            startDir = URL(fileURLWithPath: "/")
+        }
+        // Zoom (⌘⇧Z) bumps the font size by 2pt; maximise (⌘⇧X) keeps it.
+        let effectiveSize = tab.zoomBumpsFont ? fontSizeStore.size + 2 : fontSizeStore.size
+        return TerminalHost(
+            paneID: pane.id,
+            startingDirectory: startDir,
+            isFocused: focus.focusedPaneID == pane.id,
+            scheme: schemeStore.current,
+            fontSize: effectiveSize,
+            onCwdChange: { url in pane.cwd = url.path }
+        )
+    }
+
+    @ViewBuilder
+    private var borderOverlay: some View {
+        if tab.activePaneID == pane.id {
+            Rectangle()
+                .stroke(Color.accentColor.opacity(0.7), lineWidth: 2)
         }
     }
 
@@ -203,13 +107,13 @@ struct PaneView: View {
                     .foregroundStyle(.cyan).font(.system(size: 10))
             }
             Button { tab.split(.horizontal) } label: {
-                Image(systemName: "rectangle.split.2x1").font(.system(size: 10))
-            }
-            .buttonStyle(.plain).help("Split horizontally")
-            Button { tab.split(.vertical) } label: {
                 Image(systemName: "rectangle.split.1x2").font(.system(size: 10))
             }
-            .buttonStyle(.plain).help("Split vertically")
+            .buttonStyle(.plain).help("Split horizontally (divider runs horizontally)")
+            Button { tab.split(.vertical) } label: {
+                Image(systemName: "rectangle.split.2x1").font(.system(size: 10))
+            }
+            .buttonStyle(.plain).help("Split vertically (divider runs vertically)")
             Button { tab.closeActivePane() } label: {
                 Image(systemName: "xmark.circle").font(.system(size: 10))
             }
@@ -221,6 +125,10 @@ struct PaneView: View {
 
     @ViewBuilder
     private var paneContextMenu: some View {
+        Button("Copy") { sendSelectionAction(#selector(NSText.copy(_:))) }
+        Button("Paste") { sendSelectionAction(#selector(NSText.paste(_:))) }
+        Button("Select All") { sendSelectionAction(#selector(NSText.selectAll(_:))) }
+        Divider()
         Button("Split Horizontally") { tab.split(.horizontal) }
         Button("Split Vertically") { tab.split(.vertical) }
         Divider()
@@ -237,69 +145,97 @@ struct PaneView: View {
         }
     }
 
-    private func runCommand(_ cmd: String) {
-        let line = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !line.isEmpty else { return }
-        pane.content.append("\(pane.prompt) \(line)\n")
-        executeOnPane(pane, line: line)
-        if tab.broadcast {
-            for other in tab.broadcastTargets(for: pane) where other.id != pane.id {
-                other.content.append("\(other.prompt) \(line)\n")
-                executeOnPane(other, line: line)
+/// Forward a standard Cocoa text selector (Copy / Paste / Select All) to
+    /// the responder chain so it reaches the currently-focused SwiftTerm
+    /// view, which implements NSTextInputClient. `NSApp.sendAction` walks
+    /// the responder chain automatically until something handles it.
+    private func sendSelectionAction(_ action: Selector) {
+        let target: NSResponder? = NSApp.keyWindow ?? NSApp.mainWindow
+        NSApp.sendAction(action, to: nil, from: target)
+}
+}
+
+/// ⌘F find bar attached to the bottom of a pane. For MVP the search is
+/// plain-text only: counts matches and surfaces the **active line** (the line
+/// containing the currently-selected match). Scroll-to-match will come in a
+/// later iteration.
+struct FindBar: View {
+    let paneID: UUID
+    @Binding var isVisible: Bool
+    @State private var term: String = ""
+    @State private var matchIndex: Int = 0
+    @State private var matchCount: Int = 0
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").font(.system(size: 11))
+            TextField("Find", text: $term)
+                .textFieldStyle(.roundedBorder)
+                .focused($fieldFocused)
+                .onSubmit { advance(by: 1) }
+                .onChange(of: term) { _ in recount() }
+            Text(matchCount > 0
+                 ? "\(matchIndex + 1) of \(matchCount)"
+                 : (term.isEmpty ? "" : "0 matches"))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 70, alignment: .trailing)
+            Button { advance(by: -1) } label: {
+                Image(systemName: "chevron.up").font(.system(size: 11, weight: .bold))
             }
+            .buttonStyle(.borderless)
+            .disabled(matchCount == 0)
+            Button { advance(by: 1) } label: {
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
+            }
+            .buttonStyle(.borderless)
+            .disabled(matchCount == 0)
+            Button {
+                isVisible = false
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 10))
+            }
+            .buttonStyle(.borderless)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.gray.opacity(0.15))
+        .onAppear { fieldFocused = true }
+        .onExitCommand { isVisible = false }
     }
 
-    private func executeOnPane(_ pane: Pane, line: String) {
-        let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
-        switch parts[0] {
-        case "clear":
-            pane.content = ""
-            return
-        case "pwd":
-            pane.content.append((pane.cwd ?? NSHomeDirectory()) + "\n")
-            return
-        case "exit":
-            pane.content.append("(mterm MVP: shells persist; ignore exit)\n")
-            return
-        default:
-            runShell(line, pane: pane)
-        }
+    private func recount() {
+        let buffer = ScrollbackRegistry.shared.buffer(for: paneID)
+        matchCount = buffer?.count(of: term) ?? 0
+        matchIndex = matchCount > 0 ? 0 : 0
     }
 
-    private func runShell(_ line: String, pane: Pane) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let task = Process()
-            task.launchPath = "/bin/sh"
-            task.arguments = ["-c", line]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = pipe
-            do { try task.run() }
-            catch {
-                DispatchQueue.main.async {
-                    pane.content.append("mterm: failed to run: \(error.localizedDescription)\n")
-                }
-                return
-            }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            let out = String(data: data, encoding: .utf8) ?? ""
-            DispatchQueue.main.async {
-                if !out.isEmpty {
-                    pane.content.append(out.hasSuffix("\n") ? out : out + "\n")
-                }
-            }
-        }
+    private func advance(by delta: Int) {
+        guard matchCount > 0 else { return }
+        matchIndex = (matchIndex + delta + matchCount) % matchCount
+        // Scroll-to-match would go here. For MVP we just update the
+        // counter; the user scrolls manually.
     }
 }
 
-extension Pane {
-    /// Lightweight prompt — when real SwiftTerm arrives, replace with the
-    /// OSC 7-derived cwd + a machine user@host.
-    var prompt: String {
-        let dir = cwd ?? NSHomeDirectory()
-        let short = (dir as NSString).lastPathComponent
-        return "\(NSUserName())@mterm:\(short)$"
+/// Lightweight registry of scrollback buffers, keyed by pane UUID. The pane
+/// view registers when the SwiftTerm host spins up and unregisters when it
+/// tears down. Global so ⌘F (handled by AppDelegate) can find the right pane.
+@MainActor
+final class ScrollbackRegistry {
+    static let shared = ScrollbackRegistry()
+    private var buffers: [UUID: ScrollbackBuffer] = [:]
+
+    func register(paneID: UUID, buffer: ScrollbackBuffer) {
+        buffers[paneID] = buffer
+    }
+
+    func unregister(paneID: UUID) {
+        buffers.removeValue(forKey: paneID)
+    }
+
+    func buffer(for paneID: UUID) -> ScrollbackBuffer? {
+        buffers[paneID]
     }
 }

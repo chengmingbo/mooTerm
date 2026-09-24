@@ -1,4 +1,4 @@
-# mterm — macOS native port of Terminator
+# mTerm — macOS native port of Terminator
 
 A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.

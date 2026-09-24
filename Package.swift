@@ -8,17 +8,16 @@ let package = Package(
         .executable(name: "mterm", targets: ["mterm"]),
     ],
     dependencies: [
-        // SwiftTerm 1.2.3 hits a Swift 6.1.2 (CommandLineTools) compiler bug
-        // when any NSObject subclass conforms to LocalProcessTerminalViewDelegate:
-        // "type does not conform to protocol" with byte-identical method
-        // signatures. Re-enable once the toolchain catches up.
-        // .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
     ],
     targets: [
         .executableTarget(
             name: "mterm",
-            dependencies: [],
+            dependencies: ["SwiftTerm"],
             path: "Sources/mterm",
+            resources: [
+                .copy("Resources/AppIcon.icns")
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]

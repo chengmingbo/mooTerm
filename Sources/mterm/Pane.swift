@@ -4,7 +4,7 @@ import SwiftUI
 /// A single terminal pane. MVP uses a placeholder text view because the
 /// SwiftTerm 1.2.3 protocol `LocalProcessTerminalViewDelegate` has a Swift
 /// 6.1.2 (CommandLineTools) witness-table bug that prevents any conforming
-/// type from compiling. The placeholder still satisfies the mterm MVP:
+/// type from compiling. The placeholder still satisfies the mTerm MVP:
 /// per-tab panes, broadcast-group sync, OSC-7 cwd tracking.
 ///
 /// To enable the real terminal: switch to SwiftTerm 1.20.0 and wrap it
@@ -17,10 +17,19 @@ final class Pane: ObservableObject, Identifiable {
     @Published var content: String = "$ "
     /// Members of the same broadcast group share a shellID. nil = no group.
     var shellID: String? = nil
+    /// Optional command to launch instead of the user's default shell when
+    /// the pane's terminal starts. Used by saved layouts to restore a
+    /// per-pane command (e.g. `tail -F /var/log/syslog`).
+    var customCommand: String? = nil
 
     init() {
-        // Start at $HOME with a friendly placeholder banner.
-        self.cwd = ProcessInfo.processInfo.environment["HOME"] ?? "/"
+        // Start at $HOME. Use NSHomeDirectory() (which falls back to
+        // getpwuid) rather than ProcessInfo.processInfo.environment["HOME"]
+        // because `.app` bundles launched via Finder or `open` sometimes
+        // run without HOME set in the inherited environment, and we never
+        // want to land the user in `/` by default.
+        let home = NSHomeDirectory()
+        self.cwd = home.isEmpty ? "/" : home
     }
 
     func append(_ text: String) { content.append(text) }
