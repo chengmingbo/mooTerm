@@ -3,8 +3,9 @@
 A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.
 
-> MVP. Splits, tabs, broadcast group, multiple panes per window. Settings, profiles,
-> drag-drop rearrange, and plugin host are not implemented yet — see `TODO.md`.
+> Splits, tabs, broadcast groups, themes, saved layouts, and iTerm2-style
+> navigation. Settings, profiles, drag-drop rearrange, and a plugin host are not
+> implemented yet — see `TODO.md`.
 
 ## Build & run
 
@@ -17,43 +18,75 @@ swift run mterm
 Requires macOS 13+, Xcode 16 / Swift 6 toolchain. SwiftTerm 1.20.0 is fetched
 at build time.
 
-## MVP controls
+## Controls
 
 | Action | Shortcut |
 |---|---|
-| New tab | ⌘T |
+| New tab (opens in the current directory) | ⌘T |
 | Close tab | ⌘W |
-| Split horizontally (left/right) | ⇧⌘D |
-| Split vertically (top/bottom) | ⇧⌘E |
+| Select tab 1–8 / last tab | ⌘1 … ⌘8 / ⌘9 |
+| Next / previous tab | ⇧⌘] / ⇧⌘[ |
+| Split side by side | ⌘D or ⇧⌘E |
+| Split stacked | ⇧⌘D |
 | Close pane | ⌥⌘W |
+| Move to pane left / right / above / below | ⌥⌘← ⌥⌘→ ⌥⌘↑ ⌥⌘↓ |
+| Next / previous pane | ⌘] / ⌘[ |
+| Zoom pane (+2pt) / maximise pane | ⇧⌘Z / ⇧⌘X |
 | Toggle broadcast group | ⇧⌘G |
+| Find / next / previous / use selection | ⌘F / ⌘G / ⇧⌘G / ⌘E |
+| Clear buffer (screen + scrollback) | ⌘K |
+| Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
+| Save layout | ⇧⌘S |
 
-Click a pane to make it the active pane — its border highlights and keystrokes
-go to it. Toggle broadcast to fan keystrokes out to every pane in the active
-broadcast group.
+Natural text editing, as in iTerm2 (translated to readline/zle sequences):
+
+| Keys | Effect |
+|---|---|
+| ⌘← / ⌘→ | Start / end of line (⌃A / ⌃E) |
+| ⌥← / ⌥→ | Back / forward one word |
+| ⌘⌫ | Delete to start of line (⌃U) |
+| ⌥⌫ / ⌥⌦ | Delete previous / next word |
+
+Control keys such as ⌃A, ⌃E, ⌃L, ⌃R, ⌃U go to the shell unchanged.
+
+Drag a divider to resize panes; double-click it to split evenly. Clicking
+into a pane makes it active, and inactive panes are dimmed (View → Dim
+Inactive Panes). Tabs show a dot for new output and a bell when the shell
+rings. Closing a pane, tab, or the app asks first if a program is still
+running.
+
+Shells belong to their panes, so splitting, zooming, and switching tabs never
+restart them. When a shell exits, its pane closes.
+
+## Build a .app
+
+```sh
+bash scripts/build.sh            # Packaging/mterm.app
+bash scripts/build.sh --install  # also replace /Applications/mterm.app
+bash Packaging/make-icns.sh      # regenerate the icon from Resources/mterm_logo.png
+```
 
 ## Architecture
 
 ```
 Sources/mterm/
-├── App.swift             SwiftUI App, menus, AppDelegate
-├── ContentView.swift     Tab bar + recursive split tree renderer
-├── TabSession.swift      One tab; owns split tree + broadcast state
-├── Split.swift           SplitDirection, Split, SplitNode
-├── Pane.swift            One terminal pane + PTY host
-├── TerminalHost.swift    SwiftTerm LocalProcessTerminalView + delegate
-├── TerminalView.swift    NSViewRepresentable wrapper + broadcast fan-out
-└── SessionStore.swift    Window-wide state: tabs, active tab
+├── App.swift                AppDelegate, menus, focus sync, quit confirmation
+├── ContentView.swift        Tab bar + recursive split tree with draggable dividers
+├── TabSession.swift         One tab: split tree, active pane, navigation, broadcast
+├── Split.swift              SplitDirection, PaneNavigation, SplitNode
+├── Pane.swift               One pane; owns its TerminalHostView (and shell)
+├── PaneView.swift           Pane header, terminal, context menu, dimming
+├── TerminalHost.swift       NSViewRepresentable that re-parents the pane's terminal
+├── TerminalHostView.swift   ONLY file that imports SwiftTerm
+├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
+├── CloseConfirmation.swift  "program still running" prompts
+├── SessionStore.swift       Window-wide state: tabs, active tab
+├── LayoutStore.swift        Saved layouts (JSON in Application Support)
+└── ColorScheme / FontSizeStore / WindowStore / AccentColor
 ```
-
-`Pane` holds a SwiftTerm `LocalProcessTerminalView` inside a `HostBox` (a
-reference box so the NSViewRepresentable can update its broadcast list on
-every SwiftUI rebuild). `TabSession.split(.horizontal|.vertical)` rebuilds
-the split tree, marking the newly created pane active.
 
 ## Next
 
-- Drag-rearrange dividers (already 50/50, no drag yet)
 - Persist/restore layouts
 - Per-profile colour/font
 - Plugins (Terminator's `~/.config/terminator/plugins` equivalent)
