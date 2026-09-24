@@ -37,7 +37,8 @@ at build time.
 | Clear buffer (screen + scrollback) | ⌘K |
 | Bigger / smaller / reset font | ⌘= or ⌘+ / ⌘- / ⌘0 |
 | Save layout | ⇧⌘S |
-| Settings (scrollback lines, font, theme, dimming) | ⌘, |
+| Settings (scrollback lines, font, theme, dimming, Claude model) | ⌘, |
+| Claude panel: open / focus / close | ⇧⌘A |
 
 Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 
@@ -62,6 +63,34 @@ from 0 (off) to 1,000,000; open panes resize their history immediately.
 Shells belong to their panes, so splitting, zooming, and switching tabs never
 restart them. When a shell exits, its pane closes.
 
+## Claude panel
+
+A narrow panel on the left (⇧⌘A, or the ✦ button in the tab bar) turns plain
+language into shell commands for the active pane:
+
+1. Type what you want — "10 largest files under here", "which process is on
+   port 3000", "why did the last command fail?" — and press Return.
+2. Claude (through your installed [Claude Code](https://claude.com/claude-code)
+   CLI) answers with one command line, usually a pipeline, plus a risk badge:
+   **Read-only**, **Modifies**, or **Destructive**.
+3. Edit it if you like, then **Run** (⌘↩) to type it at the prompt and press
+   Return, **Insert** to put it on the prompt without running, or copy it.
+
+Details:
+
+- Claude sees the pane's directory, your shell, and the last 40 lines of
+  output, so follow-ups ("only .swift files", "sort that by size") and
+  questions about errors work. It gets no tools: it can't run anything itself.
+- Risk is the higher of Claude's rating and a local pattern check (`rm -r`,
+  `sudo`, `-delete`, `git push --force`, `curl | sh`, …). Destructive commands
+  always ask for confirmation.
+- ⚡ auto-run (off by default) runs read-only commands as soon as they arrive.
+- `!command` runs a command exactly as typed, without asking Claude.
+- If a program like `vim` is in the foreground, Run refuses instead of typing
+  into it. With broadcast on, the command goes to every pane in the group.
+- The model is set in Settings (default Haiku, fastest). Log in once with
+  `claude auth login`.
+
 ## Build a .app
 
 ```sh
@@ -82,6 +111,9 @@ Sources/mterm/
 ├── PaneView.swift           Pane header, terminal, context menu, dimming
 ├── TerminalHost.swift       NSViewRepresentable that re-parents the pane's terminal
 ├── TerminalHostView.swift   ONLY file that imports SwiftTerm
+├── AssistantPanelView.swift Claude panel UI (left sidebar)
+├── CommandAssistant.swift   Request → command proposals, risk checks, running
+├── ClaudeCLI.swift          Runs `claude -p` with structured output via the login shell
 ├── NaturalTextEditing.swift iTerm2-style ⌘/⌥ editing keys
 ├── CloseConfirmation.swift  "program still running" prompts
 ├── SettingsView.swift       Settings window (⌘,)

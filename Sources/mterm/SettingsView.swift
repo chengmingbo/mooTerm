@@ -34,6 +34,18 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Model", selection: $preferences.claudeModel) {
+                    ForEach(TerminalPreferences.claudeModelChoices, id: \.id) { Text($0.label).tag($0.id) }
+                }
+                Text("Used by the Claude panel (⇧⌘A) through your installed Claude Code CLI. Claude only proposes commands; nothing runs until you press Run, unless you turn on auto-run for read-only commands.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Claude Panel")
+            }
+
+            Section {
                 Stepper {
                     Text("Font size: \(Int(fontSizeStore.size)) pt")
                 } onIncrement: {

@@ -2,19 +2,47 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var store: SessionStore
+    @AppStorage(UserDefaults.assistantVisibleKey) private var showAssistant = false
+    @AppStorage(UserDefaults.assistantWidthKey) private var assistantWidth: Double = 300
+    @State private var dragStartWidth: Double?
 
     var body: some View {
-        VStack(spacing: 0) {
-            tabBar
-            Divider()
-            if let tab = store.activeTab {
-                TabContentView(tab: tab)
-                    .id(tab.id)
-            } else {
-                Text("No tab").foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            if showAssistant {
+                AssistantPanelView()
+                    .frame(width: assistantWidth)
+                panelDivider
+            }
+            VStack(spacing: 0) {
+                tabBar
+                Divider()
+                if let tab = store.activeTab {
+                    TabContentView(tab: tab)
+                        .id(tab.id)
+                } else {
+                    Text("No tab").foregroundStyle(.secondary)
+                }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Draggable edge between the Claude panel and the terminals.
+    private var panelDivider: some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.3))
+            .frame(width: 1)
+            .overlay(Color.clear.frame(width: 7).contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        let start = dragStartWidth ?? assistantWidth
+                        dragStartWidth = start
+                        assistantWidth = min(max(start + value.translation.width, 240), 520)
+                    }
+                    .onEnded { _ in dragStartWidth = nil }))
     }
 
     private var tabBar: some View {
@@ -23,6 +51,12 @@ struct ContentView: View {
                 tabButton(tab)
             }
             Spacer(minLength: 4)
+            Button { showAssistant.toggle() } label: {
+                Image(systemName: "sparkles").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(showAssistant ? Color.purple : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Claude panel (⇧⌘A)")
             Button { store.newTab() } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold))
             }

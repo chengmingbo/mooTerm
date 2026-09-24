@@ -131,6 +131,31 @@ final class TerminalHostView: NSObject {
         if shellIsIdle { view.send([0x0C]) }
     }
 
+    /// Put `command` on the shell's prompt (clearing anything half-typed
+    /// with ⌃U) and optionally press Return. Uses bracketed paste when the
+    /// shell enabled it, so tabs and newlines are inserted literally instead
+    /// of triggering completion or running early.
+    func typeCommand(_ command: String, execute: Bool) {
+        view.send(txt: Self.commandInput(command, execute: execute,
+                                         bracketedPaste: view.getTerminal().bracketedPasteMode))
+    }
+
+    nonisolated static func commandInput(_ command: String, execute: Bool, bracketedPaste: Bool) -> String {
+        let body = bracketedPaste ? "\u{1b}[200~\(command)\u{1b}[201~" : command
+        return "\u{15}" + body + (execute ? "\r" : "")
+    }
+
+    /// The last `lines` non-blank lines of screen + scrollback, for giving
+    /// Claude context about what just happened.
+    func recentOutput(lines: Int, maxCharacters: Int = 4_000) -> String {
+        let text = String(decoding: view.getTerminal().getBufferAsData(), as: UTF8.self)
+        var all = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        while all.last?.isEmpty == true { all.removeLast() }
+        let tail = all.suffix(lines).joined(separator: "\n")
+        return tail.count > maxCharacters ? String(tail.suffix(maxCharacters)) : tail
+    }
+
     /// Name of the foreground job when it is not the shell itself.
     var foregroundProcessName: String? {
         guard view.process.running else { return nil }

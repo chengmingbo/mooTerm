@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var layoutStore: LayoutStore!
     var windowStore: WindowStore!
     var preferences: TerminalPreferences!
+    var assistant: CommandAssistant!
     private var settingsWindow: NSWindow?
     weak var themeMenu: NSMenu?
     weak var layoutsMenu: NSMenu?
@@ -42,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         layoutStore = LayoutStore()
         windowStore = WindowStore()
         preferences = TerminalPreferences()
+        assistant = CommandAssistant()
 
         let contentView = ContentView()
             .environmentObject(sessionStore)
@@ -50,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             .environmentObject(layoutStore)
             .environmentObject(windowStore)
             .environmentObject(preferences)
+            .environmentObject(assistant)
             .frame(minWidth: 720, idealWidth: 900, maxWidth: .infinity,
                    minHeight: 480, idealHeight: 600, maxHeight: .infinity)
 
@@ -209,6 +212,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let prevPane = NSMenuItem(title: "Previous Pane", action: #selector(previousPaneAction), keyEquivalent: "[")
         prevPane.target = self
         viewMenu.addItem(prevPane)
+        let claude = NSMenuItem(title: "Claude Panel", action: #selector(toggleAssistantAction), keyEquivalent: "a")
+        claude.keyEquivalentModifierMask = [.command, .shift]
+        claude.target = self
+        viewMenu.addItem(claude)
         let dim = NSMenuItem(title: "Dim Inactive Panes", action: #selector(toggleDimAction(_:)), keyEquivalent: "")
         dim.target = self
         dim.state = Self.dimInactivePanes ? .on : .off
@@ -358,12 +365,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(selectScheme(_:)):
             item.state = (item.representedObject as? String) == schemeStore.current.id ? .on : .off
+        case #selector(toggleAssistantAction):
+            item.state = UserDefaults.standard.bool(forKey: UserDefaults.assistantVisibleKey) ? .on : .off
         case #selector(toggleDimAction(_:)):
             item.state = Self.dimInactivePanes ? .on : .off
         default:
             break
         }
         return true
+    }
+
+    /// ⇧⌘A: open the Claude panel and focus it; if it's open and focused,
+    /// close it and return to the terminal.
+    @objc func toggleAssistantAction() {
+        let defaults = UserDefaults.standard
+        let visible = defaults.bool(forKey: UserDefaults.assistantVisibleKey)
+        let terminalFocused = window?.firstResponder is MTermTerminalView
+        if visible && terminalFocused {
+            NotificationCenter.default.post(name: .mtermFocusAssistant, object: nil)
+        } else {
+            defaults.set(!visible, forKey: UserDefaults.assistantVisibleKey)
+            if visible, let view = sessionStore.activeTab?.activePane?.host?.view {
+                window?.makeFirstResponder(view)
+            }
+        }
     }
 
     @objc func showSettingsAction() {
