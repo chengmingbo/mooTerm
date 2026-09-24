@@ -464,8 +464,19 @@ private let sampleContext = TerminalContext(cwd: NSTemporaryDirectory(), shell: 
     #expect(tail == "row 28\nrow 29\nrow 30")
 }
 
-/// Opt-in end-to-end check against the installed Claude Code CLI:
-/// `MTERM_LIVE_CLAUDE=1 swift test --filter liveClaude`
+@Test func claudeRunsByNameSoShellAliasesApply() {
+    // Regression: exec'ing the binary by path skipped `alias claude='https_proxy=… claude'`
+    // and the API answered "403 Request not allowed".
+    let launch = ClaudeCLI.loginShellLaunch(arguments: ["--print"])
+    #expect(launch.arguments.prefix(3) == ["-l", "-i", "-c"])
+    #expect(launch.arguments[3].contains(#"then claude "$@""#))
+    #expect(launch.arguments.suffix(2) == ["mterm-claude", "--print"])
+    #expect(ClaudeCLI.Failure.failed("Failed to authenticate. API Error: 403 Request not allowed").message.contains("proxy"))
+}
+
+/// Opt-in end-to-end check against the installed Claude Code CLI. Strip the
+/// proxy variables to mimic a Dock-launched app:
+/// `env -u http_proxy -u https_proxy MTERM_LIVE_CLAUDE=1 swift test --filter liveClaude`
 @Test(.enabled(if: ProcessInfo.processInfo.environment["MTERM_LIVE_CLAUDE"] == "1"))
 func liveClaudeTranslatesARequest() throws {
     let context = TerminalContext(cwd: NSTemporaryDirectory(), shell: "zsh", foregroundProgram: nil,

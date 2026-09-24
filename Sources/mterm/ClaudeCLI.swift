@@ -3,10 +3,12 @@ import Foundation
 /// Runs the Claude Code CLI (`claude -p`) as a one-shot, tool-less
 /// translator with structured JSON output.
 ///
-/// Launch pattern borrowed from NemoMac: a Dock-launched app doesn't inherit
-/// the interactive shell's environment (proxies, provider keys), so the CLI
-/// runs through the user's login shell. Arguments are passed positionally
-/// and never interpolated into shell source.
+/// A Dock-launched app doesn't inherit the interactive shell's environment,
+/// so the CLI runs through the user's interactive login shell — and is
+/// invoked *by name*, so an alias, function, or wrapper the user set up for
+/// `claude` applies (e.g. `alias claude='https_proxy=… claude'`; running the
+/// binary by path skipped that and got "403 Request not allowed").
+/// Arguments are passed positionally and never interpolated into shell source.
 final class ClaudeCLI: @unchecked Sendable {
     enum Failure: Error, Equatable {
         case notInstalled
@@ -23,6 +25,9 @@ final class ClaudeCLI: @unchecked Sendable {
             case .failed(let message):
                 if message.localizedCaseInsensitiveContains("not logged in") {
                     return "\(message)\n\nRun `claude auth login` in a terminal pane, then try again."
+                }
+                if message.contains("403") {
+                    return "\(message)\n\nThe request was refused. If you normally reach Claude through a proxy or VPN, make sure `claude` works when typed in a new terminal pane (mTerm runs it the same way), or run `claude auth login`."
                 }
                 return message
             }
@@ -42,8 +47,6 @@ final class ClaudeCLI: @unchecked Sendable {
              model: String,
              workingDirectory: URL,
              timeout: TimeInterval = 120) -> Result<[String: Any], Failure> {
-        guard let executable = Self.executablePath() else { return .failure(.notInstalled) }
-
         var arguments = [
             "--print",
             "--output-format", "json",
@@ -56,7 +59,7 @@ final class ClaudeCLI: @unchecked Sendable {
         ]
         if !model.isEmpty { arguments += ["--model", model] }
 
-        let launch = Self.loginShellLaunch(executable: executable, arguments: arguments)
+        let launch = Self.loginShellLaunch(arguments: arguments)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launch.executable)
         process.arguments = launch.arguments
@@ -64,6 +67,7 @@ final class ClaudeCLI: @unchecked Sendable {
         var environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         environment["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
+        if let fallback = Self.executablePath() { environment["MTERM_CLAUDE_BIN"] = fallback }
         process.environment = environment
 
         let input = Pipe(), output = Pipe(), errors = Pipe()
@@ -103,6 +107,7 @@ final class ClaudeCLI: @unchecked Sendable {
         lock.lock(); let cancelled = wasCancelled, timedOut = didTimeOut; lock.unlock()
         if cancelled { return .failure(.cancelled) }
         if timedOut { return .failure(.timedOut) }
+        if process.terminationStatus == 127 { return .failure(.notInstalled) }
         return Self.parse(output: outputData, errorOutput: errorData, status: process.terminationStatus)
     }
 
@@ -156,9 +161,14 @@ final class ClaudeCLI: @unchecked Sendable {
 
     // MARK: - Launch
 
-    static func loginShellLaunch(executable: String, arguments: [String]) -> (executable: String, arguments: [String]) {
+    /// Runs `claude "$@"` in an interactive login shell. Aliases are
+    /// expanded because the -c string is parsed after rc files load; if the
+    /// shell can't find `claude`, fall back to the binary we located.
+    static let launchScript = #"if type claude >/dev/null 2>&1; then claude "$@"; elif [ -n "$MTERM_CLAUDE_BIN" ]; then "$MTERM_CLAUDE_BIN" "$@"; else exit 127; fi"#
+
+    static func loginShellLaunch(arguments: [String]) -> (executable: String, arguments: [String]) {
         let shell = TerminalHostView.resolveLoginShell()
-        return (shell, ["-l", "-i", "-c", "exec \"$@\"", "mterm-claude", executable] + arguments)
+        return (shell, ["-l", "-i", "-c", launchScript, "mterm-claude"] + arguments)
     }
 
     static func executablePath() -> String? {
