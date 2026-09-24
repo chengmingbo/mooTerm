@@ -7,7 +7,7 @@
 <p align="center"><b>A native macOS terminal with split panes, broadcast groups, and AI command panels.</b><br>
 Moo — like the cow.</p>
 
-A native SwiftUI/AppKit macOS port of [gnome-terminator](https://gnome-terminator.readthedocs.io/).
+A native SwiftUI/AppKit macOS terminal inspired by [gnome-terminator](https://gnome-terminator.readthedocs.io/) (an independent implementation; no Terminator code is used).
 Arranges terminals in a grid of resizable panes with broadcast-group support, like the original.
 
 > Splits, tabs, broadcast groups, themes, saved layouts, and iTerm2-style
@@ -191,3 +191,22 @@ Sources/mooterm/
 - Persist/restore layouts
 - Per-profile colour/font
 - Plugins (Terminator's `~/.config/terminator/plugins` equivalent)
+
+## License
+
+Copyright 2026 chengmingbo.
+
+mooTerm is **source-available, not for commercial use**. It is licensed under
+the [PolyForm Noncommercial License 1.0.0](LICENSE.md):
+
+- **Allowed:** using, studying, modifying, and sharing mooTerm for personal,
+  hobby, research, educational, charitable, or government purposes.
+- **Not allowed:** any commercial use — selling it, including it in a paid
+  product or service, or using it to make money — without separate
+  permission from the author.
+
+For a commercial license, contact the author through
+[GitHub](https://github.com/chengmingbo).
+
+Third-party components keep their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (SwiftTerm, MIT).

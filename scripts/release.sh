@@ -44,7 +44,7 @@ for bundle in "$arm_dir"/*.bundle; do
     [[ -d "$bundle" ]] || continue
     cp -R "$bundle" "$app/Contents/Resources/"
 done
-[[ -f .build/checkouts/SwiftTerm/LICENSE ]] && cp .build/checkouts/SwiftTerm/LICENSE "$app/Contents/Resources/SwiftTerm-LICENSE.txt"
+cp LICENSE.md THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
 
 # Ad-hoc signature: runs locally; not Developer ID signed or notarized.
 codesign --force --deep --sign - "$app"
@@ -56,6 +56,7 @@ ditto -c -k --keepParent "$app" "$zip"
 
 staging="$(mktemp -d)"
 cp -R "$app" "$staging/"
+cp LICENSE.md THIRD_PARTY_NOTICES.md "$staging/"
 ln -s /Applications "$staging/Applications"
 hdiutil create -volname "mooTerm $version" -srcfolder "$staging" -ov -format UDZO "$dmg" >/dev/null
 rm -rf "$staging"

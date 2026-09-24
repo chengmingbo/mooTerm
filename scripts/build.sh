@@ -24,6 +24,7 @@ rm -rf "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/_CodeSigna
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_dir/mooterm" "$app/Contents/MacOS/mooterm"
 cp Packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+cp LICENSE.md THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
 # SwiftPM resource bundles belong in Contents/Resources — codesign rejects
 # non-Mach-O files under Contents/MacOS.
 for bundle in "$bin_dir"/*.bundle; do
