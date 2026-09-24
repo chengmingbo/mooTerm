@@ -79,7 +79,8 @@ Natural text editing, as in iTerm2 (translated to readline/zle sequences):
 Control keys such as ⌃A, ⌃E, ⌃L, ⌃R, ⌃U go to the shell unchanged.
 
 **Copy on select** (as in iTerm2): selecting text with the mouse — drag,
-double-click a word, triple-click a line — copies it; no ⌘C needed. Toggle it
+double-click a word, triple-click a line — copies it; no ⌘C needed. A small
+"Copied 42 characters" note appears at the pane's bottom-right (also for ⌘C). Toggle it
 in Edit → Copy on Select or Settings.
 
 A pane with its own font size shows it in its header (e.g. `16 pt`); click

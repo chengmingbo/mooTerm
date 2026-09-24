@@ -14,6 +14,31 @@ final class Pane: ObservableObject, Identifiable {
     @Published var hasUnseenOutput = false
     /// The shell rang the bell since the user last looked at this pane's tab.
     @Published var bellRang = false
+    /// Briefly shown after copying ("Copied 42 characters").
+    @Published private(set) var copyToast: CopyToast?
+
+    struct CopyToast: Equatable {
+        let id = UUID()
+        let characters: Int
+
+        var message: String {
+            let number = characters.formatted(.number.grouping(.automatic))
+            return "Copied \(number) character\(characters == 1 ? "" : "s")"
+        }
+    }
+
+    static let copyToastDuration: TimeInterval = 1.6
+
+    func showCopyToast(characters: Int) {
+        let toast = CopyToast(characters: characters)
+        copyToast = toast
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.copyToastDuration * 1_000_000_000))
+            // Only clear it if no newer copy replaced it meanwhile.
+            if self?.copyToast?.id == toast.id { self?.copyToast = nil }
+        }
+    }
+
     /// Points added to the global font size for this pane only (⌘= / ⌘-).
     /// Stored relative, so changing the global size still moves this pane.
     @Published var fontSizeOffset: CGFloat = 0
@@ -79,6 +104,7 @@ final class Pane: ObservableObject, Identifiable {
         }
         host.view.onBecomeFirstResponder = { [weak self] in self?.onFocus?() }
         host.view.onInput = { [weak self] data in self?.onInput?(data) }
+        host.view.onCopied = { [weak self] count in self?.showCopyToast(characters: count) }
         host.startShell(in: dir, command: customCommand, environment: environment)
         self.host = host
         return host

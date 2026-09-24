@@ -1277,3 +1277,29 @@ private func openTestWindow(_ store: SessionStore, _ defaults: UserDefaults, sid
     #expect(!view.copySelectionIfEnabled(pasteboard: pasteboard, enabled: false))
     #expect(pasteboard.string(forType: .string) == nil)
 }
+
+@MainActor
+@Test func copyingShowsAToastThatFades() async throws {
+    try #require(NSScreen.main != nil)
+    #expect(Pane.CopyToast(characters: 1).message == "Copied 1 character")
+    let many = Pane.CopyToast(characters: 1234).message
+    #expect(many.hasPrefix("Copied 1") && many.hasSuffix("234 characters"), "grouped number, plural: \(many)")
+
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name("mooterm-toast-\(UUID().uuidString)"))
+    MooTermTerminalView.selectionPasteboard = pasteboard
+    defer { MooTermTerminalView.selectionPasteboard = .general; pasteboard.releaseGlobally() }
+
+    let store = SessionStore()
+    let tab = store.activeTab!
+    let window = renderTab(tab, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    let pane = tab.panes[0]
+    let view = try #require(pane.host?.view)
+    view.feed(text: "\u{1b}[2J\u{1b}[Hcopy me please")
+    view.selectAll()
+    #expect(view.copySelectionIfEnabled(pasteboard: pasteboard, enabled: true))
+    let copied = pasteboard.string(forType: .string) ?? ""
+    #expect(pane.copyToast?.characters == copied.count, "toast counts what was copied (\(copied.count))")
+    try await Task.sleep(nanoseconds: UInt64((Pane.copyToastDuration + 0.4) * 1_000_000_000))
+    #expect(pane.copyToast == nil, "toast fades away")
+}

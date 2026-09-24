@@ -10,6 +10,16 @@ final class MooTermTerminalView: LocalProcessTerminalView {
     var onOutput: (() -> Void)?
     var onBell: (() -> Void)?
     var onBecomeFirstResponder: (() -> Void)?
+    /// Called with the character count after text is copied (toast).
+    var onCopied: ((Int) -> Void)?
+
+    /// ⌘C / Copy menu: copy as usual, then show the toast.
+    override func copy(_ sender: Any) {
+        let text = getSelection() ?? ""
+        super.copy(sender)
+        if !text.isEmpty { onCopied?(text.count) }
+    }
+
     /// Bytes the user typed/pasted into this terminal (for broadcast).
     var onInput: ((ArraySlice<UInt8>) -> Void)?
 
@@ -49,6 +59,7 @@ final class MooTermTerminalView: LocalProcessTerminalView {
         guard enabled, selectionActive, let text = getSelection(), !text.isEmpty else { return false }
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        onCopied?(text.count)
         return true
     }
 

@@ -29,8 +29,10 @@ struct PaneView: View {
             header
             terminal
                 .overlay(dimOverlay)
+                .overlay(alignment: .bottomTrailing) { copyToast }
         }
         .background(Color(nsColor: schemeStore.current.nsBackground()))
+        .animation(.easeOut(duration: 0.2), value: pane.copyToast)
         .overlay(borderOverlay)
         .contextMenu { paneContextMenu }
     }
@@ -55,6 +57,25 @@ struct PaneView: View {
     private var dimOverlay: some View {
         if dimInactivePanes && !isActive && !isOnlyVisiblePane {
             Color.black.opacity(0.28).allowsHitTesting(false)
+        }
+    }
+
+    /// iTerm2-style confirmation in the pane's bottom-right corner.
+    @ViewBuilder
+    private var copyToast: some View {
+        if let toast = pane.copyToast {
+            Label(toast.message, systemImage: "doc.on.clipboard")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.primary.opacity(0.12)))
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                .padding(10)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .id(toast.id)
+                .allowsHitTesting(false)
+                .accessibilityLabel(toast.message)
         }
     }
 
