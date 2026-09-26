@@ -15,6 +15,7 @@ struct TerminalHost: NSViewRepresentable {
     let fontSize: CGFloat
     let scrollback: Int
     var scrollbarMode: MooTermTerminalView.ScrollbarMode = .always
+    var textMargin: CGFloat = TerminalPreferences.defaultTextMargin
     /// Extra variables for the shell, used only when it first starts.
     let environment: [String: String]
 
@@ -38,6 +39,7 @@ struct TerminalHost: NSViewRepresentable {
         host.configureAppearance(fontSize: fontSize)
         host.applyScrollback(lines: scrollback)
         host.view.setScrollbarMode(scrollbarMode)
+        container.margins = .forText(margin: textMargin, scrollbar: scrollbarMode)
         let coordinator = context.coordinator
         if isFocused && !coordinator.wasFocused {
             DispatchQueue.main.async { [weak view = host.view] in
@@ -80,12 +82,41 @@ struct TerminalHost: NSViewRepresentable {
 final class TerminalContainerView: NSView {
     weak var pane: Pane?
 
+    /// Space between the pane's edges and the terminal (points). The
+    /// pane's background shows through, so it reads as terminal padding.
+    struct Margins: Equatable {
+        var left: CGFloat = 0, right: CGFloat = 0, top: CGFloat = 0, bottom: CGFloat = 0
+
+        /// `margin` at the left, half of it above and below; the right
+        /// side only when there's no scrollbar there (it sits at the edge).
+        static func forText(margin: CGFloat, scrollbar: MooTermTerminalView.ScrollbarMode) -> Margins {
+            Margins(left: margin, right: scrollbar == .never ? margin : 0,
+                    top: (margin / 2).rounded(), bottom: (margin / 2).rounded())
+        }
+    }
+
+    var margins = Margins() {
+        didSet { if margins != oldValue { layoutTerminal() } }
+    }
+
     func adopt(_ view: NSView) {
         guard view.superview !== self else { return }
         view.removeFromSuperview()
-        view.frame = bounds
-        view.autoresizingMask = [.width, .height]
+        view.autoresizingMask = []
         addSubview(view)
+        layoutTerminal()
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        layoutTerminal()
+    }
+
+    private func layoutTerminal() {
+        guard let terminal = subviews.first else { return }
+        let frame = NSRect(x: margins.left, y: margins.bottom,
+                           width: max(0, bounds.width - margins.left - margins.right),
+                           height: max(0, bounds.height - margins.top - margins.bottom))
+        if terminal.frame != frame { terminal.frame = frame }
     }
 }
 

@@ -1381,3 +1381,33 @@ private func scrollbarWindow(_ mode: MooTermTerminalView.ScrollbarMode) -> (MooT
     host.applyScheme(.tomorrowNight)
     #expect(host.view.scrollerView?.appearance?.name == .darkAqua)
 }
+
+// MARK: - Text margins
+
+@MainActor
+@Test func terminalTextHasMarginsInsideThePane() throws {
+    try #require(NSScreen.main != nil)
+    let store = SessionStore()
+    let tab = store.activeTab!
+    let window = renderTab(tab, store: store)
+    defer { window.close(); store.tabs.forEach { $0.terminate() } }
+    let view = try #require(tab.panes[0].host?.view)
+    let container = try #require(view.superview as? TerminalContainerView)
+    let m = TerminalPreferences.defaultTextMargin
+    #expect(view.frame.minX == m, "left margin")
+    #expect(view.frame.minY == m / 2 && container.bounds.maxY - view.frame.maxY == m / 2, "top and bottom margins")
+    #expect(container.bounds.maxX - view.frame.maxX == 0, "scrollbar stays at the pane's right edge")
+
+    // Resizing keeps the margins.
+    container.setFrameSize(NSSize(width: container.frame.width - 100, height: container.frame.height - 50))
+    #expect(view.frame.minX == m && container.bounds.maxX - view.frame.maxX == 0)
+    #expect(container.bounds.maxY - view.frame.maxY == m / 2)
+}
+
+@Test func marginsFollowTheScrollbarSetting() {
+    let shown = TerminalContainerView.Margins.forText(margin: 8, scrollbar: .always)
+    #expect(shown == .init(left: 8, right: 0, top: 4, bottom: 4))
+    let none = TerminalContainerView.Margins.forText(margin: 8, scrollbar: .never)
+    #expect(none.right == 8, "no scrollbar: text gets a right margin too")
+    #expect(TerminalContainerView.Margins.forText(margin: 0, scrollbar: .always) == .init())
+}

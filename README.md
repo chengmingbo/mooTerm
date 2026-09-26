@@ -92,7 +92,8 @@ also dims the others, off by default). Tabs show a dot for new output and a bell
 rings. Closing a pane, tab, or the app asks first if a program is still
 running.
 
-Each pane has a scrollbar (Settings → Scrollbar: **Always**, **While scrolling**,
+Text sits a little away from the pane's edges (Settings → Text margin,
+default 8 pt). Each pane has a scrollbar (Settings → Scrollbar: **Always**, **While scrolling**,
 or **Never**). Scrollback defaults to 10,000 lines per pane. Change it in Settings (⌘,),
 from 0 (off) to 1,000,000; open panes resize their history immediately.
 

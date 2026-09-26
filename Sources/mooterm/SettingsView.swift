@@ -115,6 +115,10 @@ struct SettingsView: View {
                     })) {
                     ForEach(ColorScheme.all, id: \.id) { Text($0.displayName).tag($0.id) }
                 }
+                Stepper(value: $preferences.textMargin, in: TerminalPreferences.textMarginRange, step: 2) {
+                    Text("Text margin: \(Int(preferences.textMargin)) pt")
+                }
+                .help("Space between the pane's edge and the text")
                 Picker("Scrollbar", selection: $preferences.scrollbarMode) {
                     ForEach(MooTermTerminalView.ScrollbarMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }

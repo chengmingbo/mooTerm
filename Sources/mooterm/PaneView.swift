@@ -48,6 +48,7 @@ struct PaneView: View {
             fontSize: effectiveSize,
             scrollback: preferences.scrollbackLines,
             scrollbarMode: preferences.scrollbarMode,
+            textMargin: preferences.textMargin,
             environment: pane.host == nil ? preferences.paneEnvironment : [:]
         )
     }

@@ -110,6 +110,19 @@ final class TerminalPreferences: ObservableObject {
         proxyInPanes ? (effectiveProxy()?.environment ?? [:]) : [:]
     }
 
+    static let textMarginKey = "mooTerm.textMargin"
+    static let defaultTextMargin: CGFloat = 8
+    static let textMarginRange: ClosedRange<CGFloat> = 0...24
+
+    /// Padding between the pane edge and the terminal text (Settings).
+    @Published var textMargin: CGFloat {
+        didSet {
+            let clamped = min(max(textMargin, Self.textMarginRange.lowerBound), Self.textMarginRange.upperBound)
+            if clamped != textMargin { textMargin = clamped; return }
+            defaults.set(Double(clamped), forKey: Self.textMarginKey)
+        }
+    }
+
     /// Terminal scrollbar visibility (Settings → Appearance).
     @Published var scrollbarMode: MooTermTerminalView.ScrollbarMode {
         didSet { defaults.set(scrollbarMode.rawValue, forKey: MooTermTerminalView.scrollbarModeKey) }
@@ -131,6 +144,8 @@ final class TerminalPreferences: ObservableObject {
         self.proxyMode = defaults.string(forKey: Self.proxyModeKey).flatMap(ProxyMode.init(rawValue:)) ?? .automatic
         self.customProxy = defaults.string(forKey: Self.customProxyKey) ?? ""
         self.proxyInPanes = defaults.bool(forKey: Self.proxyInPanesKey)
+        self.textMargin = (defaults.object(forKey: Self.textMarginKey) as? Double).map { CGFloat($0) }
+            ?? Self.defaultTextMargin
         self.scrollbarMode = defaults.string(forKey: MooTermTerminalView.scrollbarModeKey)
             .flatMap(MooTermTerminalView.ScrollbarMode.init(rawValue:)) ?? .always
     }
